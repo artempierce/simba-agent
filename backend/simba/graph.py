@@ -4,50 +4,34 @@ graph.py — wires Simba's nodes into a LangGraph StateGraph.
 Where it sits: api.py calls `build_graph(model, checkpointer)` once at startup and keeps the
 compiled graph on `app.state.graph`; every chat turn runs through it via `graph.astream(...)`.
 
-Key idea: the graph is drawn one step at a time. Step 1 was START -> echo -> END. Step 2 puts the
-guard in front, with a *conditional edge* — a routing function LangGraph calls after a node to pick
-the next node by name. Step 3 adds the LLM intent check as a second gate; step 4 adds the reason
-node, which decides what to do (answer or clarify) and plans the reply:
-
-    START -> guard -+- pass -> intent -+- pass -> reason -> echo -> END
-                    +- blocked -> refuse    +- blocked -> refuse -> END
-
-Later steps (contracts.md § 8) replace `echo` with the real pipeline:
+Key idea: the graph is only a map of "who runs next". Each node does one job and writes its result
+into the state; *conditional edges* — routing functions LangGraph calls after a node to pick the
+next node by name — read that result and choose the path:
 
     START -> guard -+- pass -> intent -+- pass -> reason -> generate -> END
                     +- blocked -> refuse    +- blocked -> refuse -> END
+
+  guard     code rules (size + injection patterns), no model, $0        nodes/guard.py
+  intent    LLM: restate the request + safety verdict (second gate)     nodes/intent.py
+  reason    LLM: choose the action (answer / clarify) and plan it        nodes/reason.py
+  generate  LLM: write the reply, streamed to the browser                nodes/generate.py
+  refuse    fixed reply, no model, $0                                     nodes/refuse.py
+
+The MVP was drawn one step at a time: step 1 was START -> echo -> END, step 2 added the guard,
+step 3 the intent check, step 4 reason, and step 5 replaced the echo placeholder with generate.
+When tools arrive, `reason` gains a "use_tool" action and a loop through a tools node
+(design book → What "reason" means); nothing else here changes.
 """
 
-import time
-
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from simba.common import emit_trace, text_of
-from simba.nodes import intent, reason
+from simba.nodes import generate, intent, reason
 from simba.nodes.guard import guard
 from simba.nodes.refuse import refuse
 from simba.state import ChatState
-
-
-async def echo(state: ChatState) -> dict:
-    """Step-1 placeholder node: reply with the newest human message, prefixed by "You said: ".
-
-    Inputs:  state["messages"][-1] — this turn's HumanMessage (api.py resets the per-turn
-             fields and appends it before running the graph; see contracts.md § 4).
-    Outputs: {"messages": [AIMessage(...)]}, merged onto the state's message history by the
-             `add_messages` reducer (state.py).
-    Why: step 1 needs *something* to answer with so the SSE stream, trace panel and tests can
-    be built now. It emits one trace line, like every node will (contracts.md § 6), so the
-    trace panel and the `done` totals work the same way from day one.
-    """
-    start = time.perf_counter()
-    text = text_of(state["messages"][-1])
-    emit_trace("echo", "ok", f"echoed {len(text)} chars", start)
-    return {"messages": [AIMessage(f"You said: {text}")]}
 
 
 def after_guard(state: ChatState) -> str:
@@ -69,9 +53,8 @@ def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None =
     """Build and compile Simba's graph.
 
     Args:
-        model: the chat model the real nodes (intent, reason, generate — contracts.md § 7) will
-               call once they land. `echo` doesn't use it, but `build_graph` takes it now so
-               api.py's call site doesn't have to change shape when those nodes replace `echo`.
+        model: the chat model the LLM nodes (intent, reason, generate) call. Passed in, never created
+               here, so tests can hand in the free fake model (model.py).
         checkpointer: where turn-by-turn state is saved between calls, keyed by thread_id; None
                compiles without one (fine for a single-turn test), api.py always passes an
                AsyncSqliteSaver so a chat remembers earlier turns.
@@ -79,20 +62,20 @@ def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None =
     Returns: a compiled graph, ready for `.astream(...)` / `.ainvoke(...)`.
 
     Steps:
-      1. Register the nodes by name. `intent` needs the model, so it's built by its factory.
+      1. Register the nodes by name. The LLM nodes are built by their `make_node(model)` factories.
       2. START always goes to `guard`.
       3. After `guard`, `after_guard` picks `intent` or `refuse` (a conditional edge).
       4. After `intent`, `after_intent` picks `reason` or `refuse`.
-      5. `reason` always goes on to `echo` (a plain edge: there's only one way forward today).
-      6. Both `echo` and `refuse` end the turn.
+      5. `reason` always goes on to `generate` (a plain edge: there's only one way forward today).
+      6. Both `generate` and `refuse` end the turn.
     """
     graph = StateGraph(ChatState)
     # 1. Nodes.
     graph.add_node("guard", guard)
     graph.add_node("intent", intent.make_node(model))
     graph.add_node("reason", reason.make_node(model))
+    graph.add_node("generate", generate.make_node(model))
     graph.add_node("refuse", refuse)
-    graph.add_node("echo", echo)
     # 2. Every turn starts with the code guard.
     graph.add_edge(START, "guard")
     # 3. The list names every node `after_guard` may return, so LangGraph can draw and check the graph.
@@ -100,8 +83,8 @@ def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None =
     # 4. The LLM safety check gets the second say.
     graph.add_conditional_edges("intent", after_intent, ["reason", "refuse"])
     # 5. Plan, then reply.
-    graph.add_edge("reason", "echo")
+    graph.add_edge("reason", "generate")
     # 6. Both paths end the turn.
-    graph.add_edge("echo", END)
+    graph.add_edge("generate", END)
     graph.add_edge("refuse", END)
     return graph.compile(checkpointer=checkpointer)

@@ -82,7 +82,7 @@ Every node calls `emit_trace(stage, status, detail, start, tokens)` **exactly on
  "ms": 640, "input_tokens": 212, "output_tokens": 31, "cost_usd": 0.000367}
 ```
 
-`stage` ∈ `guard | intent | reason | generate | refuse` (plus `echo` in step 1 only).
+`stage` ∈ `guard | intent | reason | generate | refuse` (`echo` existed in steps 1–4 only).
 `status` ∈ `ok | blocked | error`. Detail formats are given per node in § 7. Keep details short
 (≤ 80 characters) and never put the system prompt in them.
 
@@ -165,8 +165,8 @@ START → guard ─┬─ pass ─→ intent ─┬─ pass ─→ reason → ge
                └ blocked → refuse └ blocked → refuse → END
 ```
 Routing functions `after_guard(state) -> "intent" | "refuse"` and `after_intent(state) -> "reason" | "refuse"`
-read `state["verdict"]["status"]`. Step 1 has one node, `echo` (replies `"You said: {text}"` as an
-AIMessage, trace `echo`, `ok`, `echoed {n} chars`), replaced as the real nodes land.
+read `state["verdict"]["status"]`. Steps 1–4 used a placeholder `echo` node (replied
+`"You said: {text}"`); step 5 replaced it with `generate`, giving the final shape above.
 
 ## § 9 API (`simba/api.py`)
 

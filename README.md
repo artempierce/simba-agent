@@ -24,7 +24,7 @@ your message → guard (code rules) ─┬─ blocked → refuse (fixed reply)
 | 2 | Guard + refuse | done |
 | 3 | Intent check | done |
 | 4 | Reason | done |
-| 5 | Generate (first real Claude call after the owner's OK) | planned |
+| 5 | Generate (first real Claude call after the owner's OK) | done (fake model; real Claude awaits OK) |
 | 6 | Chats sidebar: new, open, rename, delete | planned |
 | 7 | Personality tuning | planned |
 
