@@ -6,10 +6,15 @@ for the graph's reply on its way back to the browser. It never contains chat log
 lives in graph.py and the nodes it wires — only the plumbing: loading settings, opening storage,
 and turning one graph run into server-sent events (SSE).
 
-Endpoints (step 1; § 10 adds a `/api/chats` router in step 6):
+Endpoints:
 
     GET  /api/health   liveness check for the frontend/dev loop: {"ok": true}
     POST /api/chat      send one message; the reply streams back as SSE
+         /api/chats     the chat list: list, create, open, rename, delete (chats_api.py, § 10)
+
+Two stores share one SQLite file: LangGraph's checkpointer keeps each chat's *conversation* (the
+graph state, keyed by thread_id = chat id), and ChatStore (chats.py) keeps the *sidebar's* data —
+titles, timestamps and each turn's trace lines, so an old chat's trace panel can be shown again.
 
 How POST /api/chat streams. The response is SSE: a long-lived HTTP response made of small text
 blocks, each shaped like
@@ -37,6 +42,8 @@ from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import BaseModel
 
+from simba.chats import ChatStore, title_from
+from simba.chats_api import router as chats_router
 from simba.common import ms_since, text_of
 from simba.graph import build_graph
 from simba.model import cost_usd, make_model
@@ -91,15 +98,22 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
         """Runs once around the server's life: open storage, build the graph, clean up on exit.
 
         `AsyncSqliteSaver.from_conn_string` is itself an async context manager, so `async with`
-        both opens its connection and guarantees it closes when the server stops.
+        both opens its connection and guarantees it closes when the server stops. ChatStore isn't
+        a context manager, so `try/finally` does the same job for it.
         """
         resolved_db_path.parent.mkdir(parents=True, exist_ok=True)
         async with AsyncSqliteSaver.from_conn_string(str(resolved_db_path)) as checkpointer:
-            app.state.checkpointer = checkpointer
-            app.state.graph = build_graph(chat_model, checkpointer)
-            yield
+            chats = await ChatStore.open(str(resolved_db_path))
+            try:
+                app.state.checkpointer = checkpointer
+                app.state.chats = chats
+                app.state.graph = build_graph(chat_model, checkpointer)
+                yield
+            finally:
+                await chats.close()
 
     app = FastAPI(title="Simba", lifespan=lifespan)
+    app.include_router(chats_router)
 
     @app.get("/api/health")
     async def health():
@@ -111,10 +125,11 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
         """Run one turn of the graph and stream everything that happens back as SSE.
 
         Steps (contracts.md § 9):
-          1. Pick the chat id: the one given, or a fresh uuid4 hex for a new chat.
-          2. Send `start` with that id and a title (step 1: always "New chat" — step 6 swaps
-             this for `chats.title_from(req.message)` once real chat titles exist). Sent first,
-             before anything below can fail.
+          1. Find or create the chat's sidebar row: no chat_id → a new chat titled from this first
+             message (`title_from`); a known chat_id → bump its `updated_at` so it moves to the top;
+             an unknown chat_id → create the row under that id (e.g. a chat started before the row
+             existed), so the sidebar never loses a conversation.
+          2. Send `start` with the chat id and title. Sent first, before anything below can fail.
           3. Reset this turn's input exactly to contracts.md § 4's shape (history itself is kept
              by the checkpointer, keyed by chat_id) and run the graph, forwarding `custom`
              chunks as `trace` and `messages` chunks as `token` (only the generate node's actual
@@ -129,16 +144,31 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
           5. Send `done` with totals summed from the `trace` events. Steps 3-4 share one
              try/except so *any* exception after `start` — from the graph itself, or from step
              4's own state lookup — becomes an `error` event instead of the stream just stopping.
+          6. Save the turn's run (prompt, trace lines, totals or error) with the chat, so opening
+             this chat later shows its trace panel again. Saved on every ending: done or error.
         """
         graph = app.state.graph
-        # 1. Pick the chat id: the one given, or a fresh uuid4 hex for a new chat.
-        chat_id = req.chat_id or uuid.uuid4().hex
+        chats: ChatStore = app.state.chats
+        # 1. Find or create the sidebar row.
+        if req.chat_id is None:
+            chat = await chats.create(title_from(req.message), chat_id=uuid.uuid4().hex)
+        elif (chat := await chats.get(req.chat_id)) is not None:
+            await chats.touch(chat["id"])
+        else:
+            chat = await chats.create(title_from(req.message), chat_id=req.chat_id)
+        chat_id = chat["id"]
         config = {"configurable": {"thread_id": chat_id}}
 
         async def events():
             started = time.perf_counter()
+            lines: list[dict] = []  # this turn's trace lines, kept for step 6
+
+            async def save_run(summary: dict | None, error: str | None) -> None:
+                """6. Store this turn's trace block with the chat (see chats.ChatStore.add_run)."""
+                await chats.add_run(chat_id, req.message, lines, summary, error)
+
             # 2. Send `start` first, always, before anything below can fail.
-            yield sse("start", {"chat_id": chat_id, "title": "New chat"})
+            yield sse("start", {"chat_id": chat_id, "title": chat["title"]})
 
             turn_input = {
                 "messages": [HumanMessage(req.message)],
@@ -154,6 +184,7 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
                     if mode == "custom":
                         tokens_in += chunk.get("input_tokens", 0)
                         tokens_out += chunk.get("output_tokens", 0)
+                        lines.append(chunk)
                         yield sse("trace", chunk)
                     else:
                         message, metadata = chunk
@@ -169,19 +200,24 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
                     if last.type == "ai":
                         yield sse("token", {"text": text_of(last)})
                     else:
+                        await save_run(None, "no reply was produced")
                         yield sse("error", {"message": "no reply was produced"})
                         return
             except Exception as exc:
-                yield sse("error", {"message": f"{type(exc).__name__}: {exc}"})
+                message = f"{type(exc).__name__}: {exc}"
+                await save_run(None, message)
+                yield sse("error", {"message": message})
                 return
 
             # 5. Totals summed from the trace events above.
-            yield sse("done", {
+            summary = {
                 "input_tokens": tokens_in,
                 "output_tokens": tokens_out,
                 "cost_usd": cost_usd(tokens_in, tokens_out),
                 "ms": ms_since(started),
-            })
+            }
+            await save_run(summary, None)
+            yield sse("done", summary)
 
         # "no-cache" stops proxies/browsers from buffering the stream.
         return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
