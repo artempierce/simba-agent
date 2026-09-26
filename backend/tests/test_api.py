@@ -59,7 +59,7 @@ async def test_health(tmp_path):
 
 
 async def test_chat_event_order_and_echo_fallback_token(tmp_path):
-    """One turn produces events in order start -> one trace per node (guard, intent, echo) -> token -> done,
+    """One turn produces events in order start -> one trace per node (guard, intent, reason, echo) -> token -> done,
     and since `echo` never streams through the model, its reply reaches the browser via the fallback
     token (contracts.md § 9's "if no token was sent" rule) — not a real streamed token."""
     async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (_app, client):
@@ -67,15 +67,15 @@ async def test_chat_event_order_and_echo_fallback_token(tmp_path):
         events = parse_sse(resp.text)
 
         names = [name for name, _ in events]
-        assert names == ["start", "trace", "trace", "trace", "token", "done"]
+        assert names == ["start", "trace", "trace", "trace", "trace", "token", "done"]
 
         _, start_data = events[0]
         assert start_data["title"] == "New chat"
         assert isinstance(start_data["chat_id"], str) and start_data["chat_id"]
 
-        assert [data["stage"] for name, data in events if name == "trace"] == ["guard", "intent", "echo"]
+        assert [data["stage"] for name, data in events if name == "trace"] == ["guard", "intent", "reason", "echo"]
 
-        _, token_data = events[4]
+        _, token_data = events[5]
         assert token_data == {"text": "You said: hello"}
 
 
@@ -157,8 +157,8 @@ async def test_chat_error_event_when_fallback_lookup_fails(monkeypatch, tmp_path
         resp = await client.post("/api/chat", json={"message": "hi", "chat_id": None})
         events = parse_sse(resp.text)
 
-        # guard, intent and echo each emit one `trace` before the (now failing) fallback lookup runs.
-        assert [name for name, _ in events] == ["start", "trace", "trace", "trace", "error"]
+        # guard, intent, reason and echo each emit one `trace` before the (now failing) fallback lookup runs.
+        assert [name for name, _ in events] == ["start", "trace", "trace", "trace", "trace", "error"]
         assert "state lookup boom" in events[-1][1]["message"]
 
 
