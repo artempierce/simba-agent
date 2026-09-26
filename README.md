@@ -21,7 +21,7 @@ your message → guard (code rules) ─┬─ blocked → refuse (fixed reply)
 |---|---|---|
 | 0 | Repo, contracts, core modules (model, state, schemas, prompts), CI | done |
 | 1 | Skeleton: chat UI + trace panel + echo node, SSE streaming | done |
-| 2 | Guard + refuse | planned |
+| 2 | Guard + refuse | done |
 | 3 | Intent check | planned |
 | 4 | Reason | planned |
 | 5 | Generate (first real Claude call after the owner's OK) | planned |
@@ -50,6 +50,8 @@ simba-agent/
 ├── backend/simba/
 │   ├── api.py                FastAPI app: POST /api/chat streams SSE events (start/trace/token/error/done)
 │   ├── graph.py              draws the graph: which nodes run, in what order
+│   ├── guard.py              the code guard's rules: size limit + prompt-injection patterns
+│   ├── nodes/                one file per graph node: guard, refuse (more each step)
 │   ├── model.py              real Claude or the free fake model; cost per call
 │   ├── state.py              the graph's state
 │   ├── schemas.py            structured-output shapes (IntentCheck, Decision)
