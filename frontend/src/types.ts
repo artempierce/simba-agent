@@ -1,0 +1,29 @@
+/**
+ * types.ts — the shapes the frontend shares with the backend (docs/contracts.md § 6 and § 11).
+ *
+ * These mirror the JSON the API sends, so a mismatch here is a contract bug: change contracts.md,
+ * the backend and this file together.
+ */
+
+/** One line in the trace panel: what one graph node did (backend: common.emit_trace). */
+export type TraceLine = {
+  stage: string // guard | intent | reason | generate | refuse (echo in step 1)
+  status: 'ok' | 'blocked' | 'error'
+  detail: string
+  ms: number
+  input_tokens: number
+  output_tokens: number
+  cost_usd: number
+}
+
+/** Totals for one message's whole run, from the `done` event. */
+export type RunSummary = { input_tokens: number; output_tokens: number; cost_usd: number; ms: number }
+
+/** One message's trace block: your prompt, its trace lines, then a summary or an error. */
+export type Run = { prompt: string; lines: TraceLine[]; summary?: RunSummary; error?: string }
+
+/** One chat bubble. */
+export type Message = { role: 'user' | 'assistant'; content: string }
+
+/** One chat in the sidebar (step 6). Times are ISO 8601 UTC strings. */
+export type Chat = { id: string; title: string; created_at: string; updated_at: string }

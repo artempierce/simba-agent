@@ -1,4 +1,54 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/typography';
 
-/* Simba's theme tokens are defined in step 1 (docs/contracts.md § 11). */
+/*
+ * Simba's look: simple, light and friendly, with one warm savanna-amber accent (Simba is a lion) and a
+ * dark "terminal" column for the trace panel, like art-lab's.
+ *
+ * Colour names say what a colour is FOR (bg, surface, ink, accent…), not what it looks like, so
+ * components write `bg-surface` and never a hex. Each `--color-x` becomes Tailwind utilities
+ * automatically: `--color-rule` → `border-rule`, `bg-rule`, `text-rule`.
+ */
+@theme {
+  --font-sans: 'Figtree', system-ui, -apple-system, 'Segoe UI', sans-serif; /* all text */
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; /* trace, ids */
+
+  /* Page and text. Text colours are ≥ 4.5:1 on `surface` (the WCAG AA minimum). */
+  --color-bg: #f6f5f1; /* page background, sidebar */
+  --color-surface: #ffffff; /* chat pane, cards, inputs */
+  --color-raised: #efede7; /* your own chat bubbles, hovered rows, the open chat */
+  --color-ink: #1d1f24; /* main text */
+  --color-muted: #676c76; /* secondary text: dates, hints */
+  --color-rule: #e2e0d9; /* borders and dividers */
+  --color-accent: #9a5b0c; /* buttons, links, focus rings (white text on it: 5.6:1) */
+  --color-accent-ink: #ffffff; /* text on an accent background */
+  --color-accent-soft: #f6e7cf; /* gentle accent backgrounds */
+  --color-danger: #b3261e; /* errors, delete */
+
+  /* The trace panel: a terminal-dark column. */
+  --color-term: #15171c;
+  --color-term-ink: #d7dbe2;
+  --color-term-dim: #8a909b;
+  --color-term-rule: #2a2f38;
+
+  /* Trace stage colours — light pastels, readable on the terminal background. */
+  --color-t-guard: #e6ae52; /* guard: code rules */
+  --color-t-intent: #8ec5ff; /* intent: LLM safety check */
+  --color-t-reason: #c3a6ff; /* reason: action + plan */
+  --color-t-generate: #7fdcb4; /* generate: the answer */
+  --color-t-refuse: #ff8a80; /* refuse, blocked lines, errors */
+  --color-t-echo: #d7dbe2; /* echo: step 1 only */
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
