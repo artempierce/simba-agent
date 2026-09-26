@@ -3,10 +3,10 @@
  * docs/contracts.md § 11. App.tsx owns the chat data and where the sidebar sits on the page; this
  * component only renders what it's given and reports clicks back through its props.
  *
- * Each row has a "⋯" button that opens a small inline menu (Rename / Delete). Rename swaps the row
- * for a text input; Delete swaps it for an inline "Delete this chat? Yes / Cancel" — never
- * `window.confirm`, so the row itself carries the question and the outcome is announced to screen
- * readers along with everything else here.
+ * Each row has a "⋯" button that opens a small inline popover (Rename / Delete). Rename swaps the
+ * row for a text input; Delete swaps it for an inline "Delete this chat? Yes / Cancel" — never
+ * `window.confirm` — so the row itself carries the question, as plain text a screen reader reads
+ * like any other content (no separate live region).
  */
 import { useEffect, useRef, useState } from 'react'
 import type { Chat } from '../types'
@@ -28,13 +28,25 @@ type RowMode = { kind: 'menu' | 'rename' | 'delete'; id: string }
  * Renders the chat list and its per-row "⋯" menu.
  * Inputs/outputs: see `Props` above; this component holds no chat data itself, only the small bit
  * of local UI state (which row's menu/rename/delete is open) needed to drive that interaction.
+ *
+ * Main logic, per row:
+ * 1. While the "⋯" menu is open, close it on Esc or a click outside that row.
+ * 2. Commit (or drop) a rename and always close the input.
+ * 3. Render an open rename as a text input in place of the title/⋯ pair.
+ * 4. Render an open delete confirmation as inline "Delete this chat? Yes / Cancel".
+ * 5. Otherwise render the normal row: a title button plus a "⋯" button that opens the menu.
+ *
+ * Whenever a row leaves menu/rename/delete mode (step 1's Esc/outside-click, or Cancel), focus
+ * returns to that row's "⋯" button so keyboard/screen-reader focus never falls back to `<body>`.
  */
 export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }: Props) {
   const [mode, setMode] = useState<RowMode | null>(null)
   const [renameValue, setRenameValue] = useState('')
-  // Escape sets `mode` to null directly (step 3 below); this flag stops the input's own `onBlur`
-  // — fired when React then removes it from the DOM — from re-saving the value right afterwards.
-  const skipBlurSave = useRef(false)
+  // Each row's "⋯" button, keyed by chat id, so focus can be sent back to it (see the effect below).
+  const menuButtons = useRef(new Map<string, HTMLButtonElement>())
+  // The row that was in menu/rename/delete mode most recently, so that when `mode` goes back to
+  // null we know whose "⋯" button should get focus back.
+  const lastRowId = useRef<string | null>(null)
 
   // 1. While the "⋯" menu is open, close it on Esc or on any click outside that row.
   useEffect(() => {
@@ -52,6 +64,16 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
       document.removeEventListener('mousedown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
+  }, [mode])
+
+  // Track which row is/was in a special mode, and once it goes back to null, hand focus back to
+  // that row's "⋯" button — otherwise Esc/Cancel would drop keyboard focus onto `<body>`.
+  useEffect(() => {
+    if (mode) {
+      lastRowId.current = mode.id
+      return
+    }
+    if (lastRowId.current) menuButtons.current.get(lastRowId.current)?.focus()
   }, [mode])
 
   /** Opens rename mode for a chat, seeding the input with its current title. */
@@ -98,18 +120,9 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
                   onChange={(e) => setRenameValue(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') e.currentTarget.blur() // onBlur below saves it
-                    else if (e.key === 'Escape') {
-                      skipBlurSave.current = true
-                      setMode(null)
-                    }
+                    else if (e.key === 'Escape') setMode(null) // React 19 doesn't fire onBlur for this removal
                   }}
-                  onBlur={() => {
-                    if (skipBlurSave.current) {
-                      skipBlurSave.current = false
-                      return
-                    }
-                    saveRename(chat.id)
-                  }}
+                  onBlur={() => saveRename(chat.id)}
                   maxLength={80}
                   aria-label={`Rename chat: ${chat.title}`}
                   className="w-full rounded-md border border-accent bg-surface px-2 py-1.5 text-sm text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
@@ -139,6 +152,7 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
                 </button>
                 <button
                   type="button"
+                  autoFocus
                   onClick={() => setMode(null)}
                   className="text-muted hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                 >
@@ -164,8 +178,13 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
                 </button>
                 <button
                   type="button"
+                  ref={(el) => {
+                    if (el) menuButtons.current.set(chat.id, el)
+                    else menuButtons.current.delete(chat.id)
+                  }}
                   onClick={() => setMode(menuOpen ? null : { kind: 'menu', id: chat.id })}
                   aria-label={`Options for ${chat.title}`}
+                  aria-haspopup="true"
                   aria-expanded={menuOpen}
                   className="shrink-0 rounded-md px-2 text-muted hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                 >
@@ -173,10 +192,9 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
                 </button>
               </div>
               {menuOpen && (
-                <div role="menu" className="ml-2 mt-0.5 flex gap-1 rounded-md border border-rule bg-surface px-2 py-1">
+                <div className="ml-2 mt-0.5 flex gap-1 rounded-md border border-rule bg-surface px-2 py-1">
                   <button
                     type="button"
-                    role="menuitem"
                     onClick={() => startRename(chat)}
                     className="rounded px-2 py-1 text-sm text-ink hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                   >
@@ -184,7 +202,6 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
                   </button>
                   <button
                     type="button"
-                    role="menuitem"
                     onClick={() => setMode({ kind: 'delete', id: chat.id })}
                     className="rounded px-2 py-1 text-sm text-danger hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                   >
