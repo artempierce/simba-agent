@@ -8,12 +8,31 @@ LangGraph's *stream writer* (`get_stream_writer`): anything written to it comes 
 So the node doesn't know about HTTP or the UI — it just reports what it did.
 """
 
+import re
 import time
 
 from langchain_core.messages import BaseMessage
 from langgraph.config import get_stream_writer
 
 from simba.model import cost_usd
+
+
+def neutralise_tag(text: str, tag: str) -> str:
+    """Escape every opening/closing form of `<tag>` in `text` so it can't be mistaken for a real
+    delimiter a prompt wraps untrusted data in (see intent.py, reason.py).
+
+    Untrusted text (a user's message, or a model's restatement of it) must never be able to fake the
+    end of the tag it's about to be wrapped in and have whatever follows read as a fresh instruction.
+    Matches the tag name case-insensitively and tolerates whitespace slipped around the slash — the
+    cheap tricks for hiding a closing tag from a naive string check — but keeps the matched text's own
+    casing and spacing, only turning "<" into "&lt;" so it renders as plain text instead of a tag.
+
+    Examples:
+        neutralise_tag("<user_message>", "user_message")   -> "&lt;user_message>"
+        neutralise_tag("</ USER_message", "user_message")  -> "&lt;/ USER_message"
+        neutralise_tag("<  /  intent", "intent")            -> "&lt;  /  intent"
+    """
+    return re.sub(rf"<(\s*/?\s*{tag})", r"&lt;\1", text, flags=re.IGNORECASE)
 
 
 def text_of(message: BaseMessage) -> str:
