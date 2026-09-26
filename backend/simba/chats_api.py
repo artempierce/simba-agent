@@ -25,10 +25,27 @@ router = APIRouter(prefix="/api/chats")
 _ROLE_OF = {"human": "user", "ai": "assistant"}
 
 
+def _trim_title(value: str) -> str:
+    """Trim whitespace and reject a title over 80 characters after trimming (docs/contracts.md § 10).
+    Shared by POST and PATCH: PATCH also rejects a blank result (a rename must say something), while
+    POST treats a blank/missing title as "use the default" instead of an error.
+    """
+    trimmed = value.strip()
+    if len(trimmed) > 80:
+        raise ValueError("title must be at most 80 characters after trimming")
+    return trimmed
+
+
 class CreateChatBody(BaseModel):
-    """POST body: an optional title. None/omitted falls back to title_from("") = "New chat"."""
+    """POST body: an optional title, trimmed. Blank or missing -> "New chat" (title_from("")); over
+    80 characters after trim -> 422 (same length rule as PATCH, via `_trim_title`)."""
 
     title: str | None = None
+
+    @field_validator("title")
+    @classmethod
+    def _trim(cls, value: str | None) -> str | None:
+        return _trim_title(value) if value is not None else None
 
 
 class RenameChatBody(BaseModel):
@@ -39,10 +56,10 @@ class RenameChatBody(BaseModel):
     @field_validator("title")
     @classmethod
     def _trimmed_length(cls, value: str) -> str:
-        """Trim whitespace and reject a title that's then empty or over 80 characters, so FastAPI
-        turns a bad title into a 422 response by itself (no manual check needed in the endpoint)."""
-        trimmed = value.strip()
-        if not 1 <= len(trimmed) <= 80:
+        """Trim whitespace and reject a title that's then empty (PATCH, unlike POST, has no default to
+        fall back to) or over 80 characters, so FastAPI turns a bad title into a 422 response by itself."""
+        trimmed = _trim_title(value)
+        if not trimmed:
             raise ValueError("title must be 1-80 characters after trimming")
         return trimmed
 
@@ -79,13 +96,18 @@ async def get_chat(chat_id: str, request: Request) -> dict:
     3. Keep only human/ai messages, renamed to the roles the frontend's Message type uses.
     4. Attach the chat's runs (trace history) from the ChatStore.
     """
+    # 1. Look up the chat, 404 if the id is unknown.
     chat = await _get_or_404(request, chat_id)
+    # 2. Ask the graph for this thread's checkpointed state; a chat with no turns yet has no saved
+    #    state, so `.values` is empty and `messages` defaults to [].
     state = await request.app.state.graph.aget_state({"configurable": {"thread_id": chat_id}})
+    # 3. Keep only human/ai messages, renamed to the roles the frontend's Message type uses.
     messages = [
         {"role": _ROLE_OF[m.type], "content": text_of(m)}
         for m in state.values.get("messages", [])
         if m.type in _ROLE_OF
     ]
+    # 4. Attach the chat's runs (trace history) from the ChatStore.
     runs = await request.app.state.chats.runs(chat_id)
     return {"chat": chat, "messages": messages, "runs": runs}
 
@@ -100,7 +122,11 @@ async def rename_chat(chat_id: str, body: RenameChatBody, request: Request) -> d
 @router.delete("/{chat_id}", status_code=204)
 async def delete_chat(chat_id: str, request: Request) -> None:
     """DELETE /api/chats/{id} -> remove the chat and its runs, and erase its checkpointed graph state
-    (adelete_thread) so nothing of a deleted chat is left in either store."""
+    (adelete_thread) so nothing of a deleted chat is left in either store.
+
+    Checkpointer first, then the ChatStore row: if adelete_thread fails, the chat still shows up as a
+    404-free row to retry against, instead of a checkpoint orphaned behind an already-gone chat.
+    """
     await _get_or_404(request, chat_id)
-    await request.app.state.chats.delete(chat_id)
     await request.app.state.checkpointer.adelete_thread(chat_id)
+    await request.app.state.chats.delete(chat_id)

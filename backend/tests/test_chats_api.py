@@ -89,14 +89,39 @@ async def test_create_list_and_get_chat(tmp_path):
             assert body["runs"] == []
 
 
-async def test_create_without_title_defaults_to_new_chat(tmp_path):
-    """POST with no title in the body still creates a usable chat, titled "New chat" (same rule
-    title_from uses for an empty message)."""
+async def test_get_chat_with_no_turns_yet(tmp_path):
+    """A brand-new chat has no checkpointed state and no runs yet — GET must return empty lists for
+    both, not an error, since api.py creates the chat row before the first turn ever runs."""
     async with _test_app(tmp_path) as (app, chats, graph):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            created = await client.post("/api/chats", json={})
-            assert created.status_code == 201
-            assert created.json()["title"] == "New chat"
+            chat_id = (await client.post("/api/chats", json={"title": "fresh"})).json()["id"]
+
+            detail = await client.get(f"/api/chats/{chat_id}")
+            assert detail.status_code == 200
+            body = detail.json()
+            assert body["messages"] == []
+            assert body["runs"] == []
+
+
+async def test_create_chat_title_validation(tmp_path):
+    """POST shares PATCH's trim-and-length rule (docs/contracts.md § 10): a blank/missing title falls
+    back to "New chat" instead of erroring, whitespace is trimmed, and over 80 characters is 422."""
+    async with _test_app(tmp_path) as (app, chats, graph):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            missing = await client.post("/api/chats", json={})
+            assert missing.status_code == 201
+            assert missing.json()["title"] == "New chat"
+
+            blank = await client.post("/api/chats", json={"title": "   "})
+            assert blank.status_code == 201
+            assert blank.json()["title"] == "New chat"
+
+            trimmed = await client.post("/api/chats", json={"title": "  trip  "})
+            assert trimmed.status_code == 201
+            assert trimmed.json()["title"] == "trip"
+
+            too_long = await client.post("/api/chats", json={"title": "x" * 81})
+            assert too_long.status_code == 422
 
 
 async def test_rename_chat_trims_and_validates_title_length(tmp_path):
@@ -124,6 +149,9 @@ async def test_delete_chat_removes_row_and_checkpointed_state(tmp_path):
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             chat_id = (await client.post("/api/chats", json={"title": "bye"})).json()["id"]
             await _seed_thread(graph, chat_id)
+
+            before = await graph.aget_state({"configurable": {"thread_id": chat_id}})
+            assert before.values.get("messages", []) != []  # seeded, so deletion below is meaningful
 
             deleted = await client.delete(f"/api/chats/{chat_id}")
             assert deleted.status_code == 204

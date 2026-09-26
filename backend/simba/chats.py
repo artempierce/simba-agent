@@ -38,12 +38,12 @@ def title_from(message: str) -> str:
 
     Example: title_from("  plan   a trip\\nto Rome  ") -> "plan a trip to Rome"
     """
+    # 1. Collapse all whitespace to single spaces and trim the ends.
     collapsed = " ".join(message.split())
-    if not collapsed:
-        return "New chat"
-    if len(collapsed) > 40:
-        return collapsed[:40] + "…"
-    return collapsed
+    # 2. Cut to 40 characters with a trailing "…" if it was cut.
+    title = collapsed[:40] + "…" if len(collapsed) > 40 else collapsed
+    # 3. An empty result becomes "New chat" so no chat is ever titled "".
+    return title or "New chat"
 
 
 class ChatStore:
@@ -89,9 +89,12 @@ class ChatStore:
         return {"id": chat_id, "title": title, "created_at": now, "updated_at": now}
 
     async def list(self) -> list[dict]:
-        """All chats, newest `updated_at` first — so a chat you just used sorts to the top of the sidebar."""
+        """All chats, newest `updated_at` first — so a chat you just used sorts to the top of the
+        sidebar. Ties (two chats updated in the same microsecond) break on `rowid` — SQLite's hidden,
+        always-increasing insertion-order column — so the order is deterministic instead of
+        depending on how SQLite happens to walk ties."""
         cursor = await self._db.execute(
-            "SELECT id, title, created_at, updated_at FROM chats ORDER BY updated_at DESC"
+            "SELECT id, title, created_at, updated_at FROM chats ORDER BY updated_at DESC, rowid DESC"
         )
         rows = await cursor.fetchall()
         return [dict(zip(("id", "title", "created_at", "updated_at"), row)) for row in rows]
