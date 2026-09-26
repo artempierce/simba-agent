@@ -26,8 +26,11 @@ async def test_build_graph_runs_echo_end_to_end():
     """`build_graph` wires START -> echo -> END: running the compiled graph on one human message
     returns a two-message history ending in the echo reply. The fake model is passed but unused
     (contracts.md § 8 says step 1's echo doesn't call it) — protects that `build_graph` still
-    accepts a model without needing it."""
-    graph = build_graph(fake_model())
+    accepts a model without needing it, and `model.calls == []` proves it truly went unused,
+    not just unread by this assertion."""
+    model = fake_model()
+    graph = build_graph(model)
     turn_input = {"messages": [HumanMessage("test")], "verdict": None, "intent": None, "decision": None}
     result = await graph.ainvoke(turn_input)
     assert [m.content for m in result["messages"]] == ["test", "You said: test"]
+    assert model.calls == []

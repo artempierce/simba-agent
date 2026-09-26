@@ -140,3 +140,88 @@ async def test_chat_error_event_on_node_exception(monkeypatch, tmp_path):
 
         assert [name for name, _ in events] == ["start", "error"]
         assert "node boom" in events[-1][1]["message"]
+
+
+async def test_chat_error_event_when_fallback_lookup_fails(monkeypatch, tmp_path):
+    """Regression test: the fallback (`graph.aget_state` + fallback token) used to sit outside the
+    try/except around the graph stream, so a failure there ended the response after `start` with
+    no `error`/`done`. It now runs inside the same try, so this must still surface as `error`."""
+    async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (app, client):
+        async def broken_aget_state(config):
+            raise RuntimeError("state lookup boom")
+
+        monkeypatch.setattr(app.state.graph, "aget_state", broken_aget_state)
+
+        resp = await client.post("/api/chat", json={"message": "hi", "chat_id": None})
+        events = parse_sse(resp.text)
+
+        # echo emits one `trace` before the (now failing) fallback lookup runs.
+        assert [name for name, _ in events] == ["start", "trace", "error"]
+        assert "state lookup boom" in events[-1][1]["message"]
+
+
+async def test_fallback_never_echoes_user_text_when_no_reply_produced(monkeypatch, tmp_path):
+    """If a node returns no message update at all, the newest saved message is still the user's
+    own HumanMessage (`type == "human"`). The fallback must recognise that and send `error`
+    instead of echoing the user's own input back disguised as an answer (contracts.md § 9)."""
+
+    def noop_build_graph(model, checkpointer=None):
+        async def noop(state):
+            return {}
+
+        graph = StateGraph(ChatState)
+        graph.add_node("noop", noop)
+        graph.add_edge(START, "noop")
+        graph.add_edge("noop", END)
+        return graph.compile(checkpointer=checkpointer)
+
+    monkeypatch.setattr("simba.api.build_graph", noop_build_graph)
+
+    async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (_app, client):
+        resp = await client.post("/api/chat", json={"message": "secret input", "chat_id": None})
+        events = parse_sse(resp.text)
+
+        assert [name for name, _ in events] == ["start", "error"]
+        assert events[-1][1]["message"] == "no reply was produced"
+        assert "secret input" not in resp.text
+
+
+async def test_only_generate_node_tokens_stream_and_no_fallback_once_sent(monkeypatch, tmp_path):
+    """§ 9's token rules on a two-node graph: a non-"generate" node ("other") also calls the
+    model, but its streamed text must never reach the browser as `token`; only "generate"'s text
+    does, empty chunks are skipped, and once real tokens streamed no fallback token is added."""
+
+    def two_node_build_graph(model, checkpointer=None):
+        async def other(state):
+            # A plain model call from a node that isn't "generate" — stands in for intent/reason,
+            # whose structured-output calls must stay invisible to the chat (contracts.md § 9).
+            await model.ainvoke([HumanMessage("side call")])
+            return {}
+
+        async def generate(state):
+            reply = await model.ainvoke([HumanMessage("answer")])
+            return {"messages": [reply]}
+
+        graph = StateGraph(ChatState)
+        graph.add_node("other", other)
+        graph.add_node("generate", generate)
+        graph.add_edge(START, "other")
+        graph.add_edge("other", "generate")
+        graph.add_edge("generate", END)
+        return graph.compile(checkpointer=checkpointer)
+
+    monkeypatch.setattr("simba.api.build_graph", two_node_build_graph)
+
+    async with running_app(model=fake_model(reply="ok go"), db_path=str(tmp_path / "t.db")) as (_app, client):
+        resp = await client.post("/api/chat", json={"message": "hi", "chat_id": None})
+        events = parse_sse(resp.text)
+
+        names = [name for name, _ in events]
+        assert names[0] == "start" and names[-1] == "done"
+        tokens = [data["text"] for name, data in events if name == "token"]
+        # "other"'s own streamed "ok go" chunks are dropped; only "generate"'s reach the browser,
+        # and joining them gives the reply exactly once, not twice.
+        assert "".join(tokens) == "ok go"
+        assert all(text != "" for text in tokens)  # empty chunks are skipped, never sent
+        # A real token streamed, so the fallback (a second, redundant `token`) must not fire.
+        assert names.count("token") == len(tokens)

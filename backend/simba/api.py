@@ -113,25 +113,31 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
         Steps (contracts.md § 9):
           1. Pick the chat id: the one given, or a fresh uuid4 hex for a new chat.
           2. Send `start` with that id and a title (step 1: always "New chat" — step 6 swaps
-             this for `chats.title_from(req.message)` once real chat titles exist).
+             this for `chats.title_from(req.message)` once real chat titles exist). Sent first,
+             before anything below can fail.
           3. Reset this turn's input exactly to contracts.md § 4's shape (history itself is kept
              by the checkpointer, keyed by chat_id) and run the graph, forwarding `custom`
              chunks as `trace` and `messages` chunks as `token` (only the generate node's actual
              answer text — other nodes' model calls are structured-output tool calls, not text
              the user should see).
           4. If nothing became a `token` (e.g. echo's reply never goes through the model, so it
-             never streams as a "messages" chunk), fall back to sending the newest AI message's
-             full text as one `token` before `done`.
-          5. Send `done` with totals summed from the `trace` events, or `error` if the graph
-             raised (then the stream just ends — no `done` after an `error`).
+             never streams as a "messages" chunk), fall back to the newest message: if it's this
+             turn's AI reply (`type == "ai"` — the human message went in first, so an AI message
+             at the end can only be from this turn), send its full text as one `token`;
+             otherwise no reply was actually produced, so send `error` rather than letting the
+             user's own message come back disguised as an answer.
+          5. Send `done` with totals summed from the `trace` events. Steps 3-4 share one
+             try/except so *any* exception after `start` — from the graph itself, or from step
+             4's own state lookup — becomes an `error` event instead of the stream just stopping.
         """
         graph = app.state.graph
+        # 1. Pick the chat id: the one given, or a fresh uuid4 hex for a new chat.
         chat_id = req.chat_id or uuid.uuid4().hex
         config = {"configurable": {"thread_id": chat_id}}
 
         async def events():
             started = time.perf_counter()
-            # Step 1: title is always "New chat"; step 6 replaces this with chats.title_from.
+            # 2. Send `start` first, always, before anything below can fail.
             yield sse("start", {"chat_id": chat_id, "title": "New chat"})
 
             turn_input = {
@@ -143,6 +149,7 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
             tokens_in = tokens_out = 0
             token_sent = False
             try:
+                # 3. Run the graph, forwarding trace lines and the generate node's answer text.
                 async for mode, chunk in graph.astream(turn_input, config, stream_mode=["messages", "custom"]):
                     if mode == "custom":
                         tokens_in += chunk.get("input_tokens", 0)
@@ -153,15 +160,22 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
                         if metadata.get("langgraph_node") == "generate" and (text := text_of(message)):
                             token_sent = True
                             yield sse("token", {"text": text})
+
+                # 4. No streamed token (e.g. echo, which never calls the model): fall back to the
+                #    newest message, but only if it's really this turn's reply.
+                if not token_sent:
+                    state = await graph.aget_state(config)
+                    last = state.values["messages"][-1]
+                    if last.type == "ai":
+                        yield sse("token", {"text": text_of(last)})
+                    else:
+                        yield sse("error", {"message": "no reply was produced"})
+                        return
             except Exception as exc:
                 yield sse("error", {"message": f"{type(exc).__name__}: {exc}"})
                 return
 
-            if not token_sent:
-                state = await graph.aget_state(config)
-                last_ai = state.values["messages"][-1]
-                yield sse("token", {"text": text_of(last_ai)})
-
+            # 5. Totals summed from the trace events above.
             yield sse("done", {
                 "input_tokens": tokens_in,
                 "output_tokens": tokens_out,
