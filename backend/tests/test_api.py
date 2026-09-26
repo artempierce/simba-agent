@@ -16,7 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 
-from simba.api import create_app
+from simba.api import ChatRequest, create_app
 from simba.model import FAKE_REPLY, fake_model
 from simba.nodes.refuse import REFUSAL_TEXT
 from simba.state import ChatState
@@ -191,12 +191,15 @@ async def test_fallback_never_echoes_user_text_when_no_reply_produced(monkeypatc
 
     monkeypatch.setattr("simba.api.build_graph", noop_build_graph)
 
-    async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (_app, client):
+    async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (app, client):
         resp = await client.post("/api/chat", json={"message": "secret input", "chat_id": None})
         events = parse_sse(resp.text)
 
         assert [name for name, _ in events] == ["start", "error"]
         assert events[-1][1]["message"] == "no reply was produced"
+        # The failed turn is still saved with the chat, carrying that error.
+        [run] = await app.state.chats.runs(events[0][1]["chat_id"])
+        assert run["error"] == "no reply was produced" and run["summary"] is None
         # The chat's *title* is made from the message (that's expected); what must never happen is
         # the message coming back as an answer, i.e. inside a `token` event.
         assert not any(name == "token" for name, _ in events)
@@ -290,3 +293,32 @@ async def test_error_turn_is_saved_with_its_error(monkeypatch, tmp_path):
         events = parse_sse((await client.post("/api/chat", json={"message": attack, "chat_id": None})).text)
         runs = await app.state.chats.runs(events[0][1]["chat_id"])
         assert runs[0]["summary"] is None and "state lookup boom" in runs[0]["error"]
+        assert [line["stage"] for line in runs[0]["lines"]] == ["guard", "refuse"]  # the trace block is kept
+
+
+async def test_unknown_chat_id_is_refused_not_created(tmp_path):
+    """A chat_id the server doesn't know (e.g. deleted in another tab, or made up) gets a 404 before
+    any streaming — client text never becomes a database key, and a deleted chat never comes back."""
+    async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (_app, client):
+        resp = await client.post("/api/chat", json={"message": "hi", "chat_id": "not-a-real-chat"})
+        assert resp.status_code == 404 and resp.json() == {"detail": "chat not found"}
+        assert (await client.get("/api/chats")).json() == []
+
+
+async def test_disconnect_mid_stream_still_saves_the_run(tmp_path):
+    """If the browser goes away mid-answer, the server closes the stream early. The turn's run must
+    still be saved (marked interrupted) so a reopened chat never shows a message without its trace.
+    Simulated by reading only the `start` event from the response body and then closing it — what
+    the server does when the client disconnects."""
+    async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (app, _client):
+        chat_route = next(r for r in app.routes if getattr(r, "path", "") == "/api/chat")
+        response = await chat_route.endpoint(ChatRequest(message="tell me a story", chat_id=None))
+        body = response.body_iterator
+        first = await body.__anext__()
+        assert first.startswith("event: start")
+        await body.aclose()
+
+        [chat] = await app.state.chats.list()
+        [run] = await app.state.chats.runs(chat["id"])
+        assert run["prompt"] == "tell me a story"
+        assert run["summary"] is None and run["error"] == "interrupted before the reply finished"

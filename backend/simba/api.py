@@ -34,8 +34,9 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import anyio
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
@@ -127,8 +128,7 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
         Steps (contracts.md § 9):
           1. Find or create the chat's sidebar row: no chat_id → a new chat titled from this first
              message (`title_from`); a known chat_id → bump its `updated_at` so it moves to the top;
-             an unknown chat_id → create the row under that id (e.g. a chat started before the row
-             existed), so the sidebar never loses a conversation.
+             an unknown chat_id (e.g. deleted in another tab) → 404, before any streaming starts.
           2. Send `start` with the chat id and title. Sent first, before anything below can fail.
           3. Reset this turn's input exactly to contracts.md § 4's shape (history itself is kept
              by the checkpointer, keyed by chat_id) and run the graph, forwarding `custom`
@@ -146,27 +146,49 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
              4's own state lookup — becomes an `error` event instead of the stream just stopping.
           6. Save the turn's run (prompt, trace lines, totals or error) with the chat, so opening
              this chat later shows its trace panel again. Saved on every ending: done or error.
+          7. If the stream is cut off before step 6 (the browser disconnected), save the run anyway,
+             marked as interrupted — so a reopened chat never shows a message without its trace.
         """
         graph = app.state.graph
         chats: ChatStore = app.state.chats
-        # 1. Find or create the sidebar row.
+        # 1. Find or create the sidebar row. An id we don't know is refused, never created: the
+        #    client's text must not become a database key (untrusted input — CLAUDE.md).
         if req.chat_id is None:
             chat = await chats.create(title_from(req.message), chat_id=uuid.uuid4().hex)
         elif (chat := await chats.get(req.chat_id)) is not None:
             await chats.touch(chat["id"])
         else:
-            chat = await chats.create(title_from(req.message), chat_id=req.chat_id)
+            raise HTTPException(status_code=404, detail="chat not found")
         chat_id = chat["id"]
         config = {"configurable": {"thread_id": chat_id}}
 
         async def events():
-            started = time.perf_counter()
-            lines: list[dict] = []  # this turn's trace lines, kept for step 6
+            """The SSE stream for this turn: `stream_turn` below, plus a guarantee that the turn's
+            run is saved even if the stream is cut off (step 7)."""
+            lines: list[dict] = []  # this turn's trace lines, kept for steps 6–7
+            saved = False
 
             async def save_run(summary: dict | None, error: str | None) -> None:
                 """6. Store this turn's trace block with the chat (see chats.ChatStore.add_run)."""
+                nonlocal saved
+                saved = True
                 await chats.add_run(chat_id, req.message, lines, summary, error)
 
+            try:
+                async for event in stream_turn(lines, save_run):
+                    yield event
+            finally:
+                # 7. The browser went away mid-answer (tab closed, "New chat" clicked): the server
+                #    cancels this generator, which skips the saves above. Save what we have, marked
+                #    as interrupted. `CancelScope(shield=True)` lets this one await finish even though
+                #    the surrounding task is being cancelled.
+                if not saved:
+                    with anyio.CancelScope(shield=True):
+                        await chats.add_run(chat_id, req.message, lines, None, "interrupted before the reply finished")
+
+        async def stream_turn(lines: list[dict], save_run):
+            """Steps 2–6 for one turn, yielding SSE strings (see `chat`'s docstring)."""
+            started = time.perf_counter()
             # 2. Send `start` first, always, before anything below can fail.
             yield sse("start", {"chat_id": chat_id, "title": chat["title"]})
 

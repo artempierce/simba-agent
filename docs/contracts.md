@@ -187,6 +187,12 @@ read `state["verdict"]["status"]`. Steps 1–4 used a placeholder `echo` node (r
 | `error` | `{"message": str}` | an exception; then the stream ends |
 | `done` | `{"input_tokens", "output_tokens", "cost_usd", "ms"}` | last; totals summed from trace events |
 
+Chats (step 6): `chat_id: null` creates the chat row (title per § 10); a known id is touched (moves to
+the top); an **unknown id → 404 `{"detail": "chat not found"}`** before any SSE — client text never
+becomes a database key. Every turn's run (`prompt`, trace `lines`, `summary` or `error`) is saved with
+the chat on `done` and on `error`; if the stream is cut off (client disconnect) it is saved anyway
+with `error = "interrupted before the reply finished"`.
+
 SSE framing: `event: {name}\ndata: {json}\n\n`. Run with
 `graph.astream(input, {"configurable": {"thread_id": chat_id}}, stream_mode=["messages", "custom"])`.
 Forward `custom` chunks as `trace`. Forward `messages` chunks as `token` **only** when
