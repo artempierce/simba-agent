@@ -19,7 +19,9 @@ a later step) is the second, model-based layer.
 
 Ported from art-lab's guards/input.py (`/Users/sol/art-lab/backend/artlab/guards/input.py`), dropping
 the session-budget check — Simba has no per-chat budget yet — and widening `fake-tags` to also catch
-Simba's own `<user_message>` delimiter tag (see that rule's comment below).
+Simba's own `<user_message>` delimiter tag (see that rule's comment below). `find_injection` also
+normalizes the text first (see `_normalize_for_matching`) so zero-width and fullwidth look-alike
+characters can't be used to sneak an attack past every rule at once.
 
 Design choice: `check_input()` returns a `GuardResult` instead of raising. The guard only *decides*;
 the guard node decides what to *do* about it (write a trace line, route to refuse). That keeps this
@@ -27,6 +29,7 @@ file a pure function that's trivial to test.
 """
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 # Longest message accepted, in characters (~1,000 tokens). Protects cost and latency.
@@ -102,11 +105,23 @@ INJECTION_RULES: dict[str, re.Pattern[str]] = {
     # Allows:   "<b>bold</b>" and other ordinary tags
     # These tag names are our own delimiters. "system"/"assistant" are message roles; "user_message" is
     # the wrapper the (future) intent node puts around the untrusted user text (contracts.md § 7.4).
-    # Simba change from art-lab: added "user_message" (any case, any spacing around it — the existing
-    # `\s*`/`[^>]*` already allow that) so a user can't type a fake closing tag and smuggle a sibling
-    # instruction the intent node would read as part of its own prompt.
+    # "untrusted_retrieval" is kept from art-lab even though Simba has no retrieval step yet, so the
+    # rule is already in place for whenever Simba grows a retrieval delimiter of its own.
+    # Simba change from art-lab: added "user_message" (any case, any spacing around it — the pattern
+    # below allows that) so a user can't type a fake closing tag and smuggle a sibling instruction the
+    # intent node would read as part of its own prompt.
     # A user typing any of these tags is trying to fake a boundary the model trusts.
-    "fake-tags": re.compile(r"<\s*/?\s*(system|assistant|untrusted_retrieval|user_message)\b[^>]*>", re.IGNORECASE),
+    #
+    # Performance note: the tag name is optional-slash-then-name, written as `\s*(?:/\s*)?` rather
+    # than the more obvious `\s*/?\s*`. Both accept the same strings ("<system>", "< / system>", …),
+    # but two adjacent unbounded `\s*` runs (with nothing but an optional character between them that
+    # doesn't even match whitespace) give the regex engine many equivalent ways to split a long run of
+    # spaces between them. On a message that's almost all spaces with no tag at all — e.g. "<" followed
+    # by ~4000 spaces — that ambiguity made this rule take O(n²) time (~211 ms) before it could report
+    # "no match", which blocks the whole async event loop. Nesting the second `\s*` inside the optional
+    # `/` group removes the ambiguity (it only runs when a "/" was actually found), so there's exactly
+    # one way to match and the check is linear again (see the timing test in tests/test_guard.py).
+    "fake-tags": re.compile(r"<\s*(?:/\s*)?(system|assistant|untrusted_retrieval|user_message)\b[^>]*>", re.IGNORECASE),
 }
 
 
@@ -124,15 +139,37 @@ class GuardResult:
     reason: str
 
 
+def _normalize_for_matching(text: str) -> str:
+    """Undo two look-alike tricks that would otherwise slip past every regex above, unchanged.
+
+    1. NFKC ("compatibility composition") folds visually-equivalent characters to the plain form a
+       rule is written against — e.g. the fullwidth "＜"/"＞" (U+FF1C/FF1E, common on some IMEs and
+       keyboards) become the ordinary "<"/">" that `fake-tags` looks for.
+    2. Zero-width formatting characters (Unicode category "Cf": zero-width space U+200B, zero-width
+       non-joiner, the byte-order mark, …) render invisibly but split a word in two for a naive regex.
+       "ign​ore all previous instructions" *looks* like "ignore all previous instructions" but has
+       a hidden character between "ign" and "ore", which would stop `\bignore\b` from matching. NFKC
+       doesn't remove these, so they're stripped explicitly, after normalizing.
+
+    Only used for injection matching. `check_input`'s size limit and its "pass · {n} chars" reason
+    keep using the raw text — silently shrinking what was actually sent would misreport the size.
+    """
+    folded = unicodedata.normalize("NFKC", text)
+    return "".join(char for char in folded if unicodedata.category(char) != "Cf")
+
+
 def find_injection(text: str) -> str | None:
     """Return the name of the first injection rule that matches `text`, or None if none match.
 
     Rules run in INJECTION_RULES's declaration order, so when a message could match more than one
     rule (e.g. "bypass your filters" — see tests/test_guard.py), the earlier rule wins.
     """
-    # 1. Try each compiled pattern in turn; the first hit names the block.
+    # 1. Normalize away look-alike tricks (see _normalize_for_matching) before matching anything.
+    normalized = _normalize_for_matching(text)
+
+    # 2. Try each compiled pattern in turn; the first hit names the block.
     for rule, pattern in INJECTION_RULES.items():
-        if pattern.search(text):
+        if pattern.search(normalized):
             return rule
     return None
 
