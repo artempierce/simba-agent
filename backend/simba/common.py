@@ -32,7 +32,10 @@ def neutralise_tag(text: str, tag: str) -> str:
         neutralise_tag("</ USER_message", "user_message")  -> "&lt;/ USER_message"
         neutralise_tag("<  /  intent", "intent")            -> "&lt;  /  intent"
     """
-    return re.sub(rf"<(\s*/?\s*{tag})", r"&lt;\1", text, flags=re.IGNORECASE)
+    # `\s*(?:/\s*)?` instead of `\s*/?\s*`: two adjacent `\s*` can split a run of spaces in n ways,
+    # so "<" + 4,000 spaces took ~200 ms (quadratic backtracking). This form matches the same tags in
+    # linear time. re.escape keeps a tag name from being read as regex syntax.
+    return re.sub(rf"<(\s*(?:/\s*)?{re.escape(tag)})", r"&lt;\1", text, flags=re.IGNORECASE)
 
 
 def text_of(message: BaseMessage) -> str:
