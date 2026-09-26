@@ -33,15 +33,17 @@ async def stages(graph, text: str) -> list[str]:
     return [c["stage"] async for c in graph.astream(turn(text), stream_mode="custom")]
 
 
-async def test_safe_message_runs_guard_intent_echo():
-    """A normal message goes guard -> intent -> echo: the history ends in the echo reply, the trace
-    shows the three steps in order, and the intent check really called the model (once)."""
+async def test_safe_message_runs_guard_intent_reason_echo():
+    """A normal message goes guard -> intent -> reason -> echo: the history ends in the echo reply,
+    the trace shows the four steps in order, both LLM steps called the model once each, and the
+    reason step's decision is left in the state for the reply step to follow."""
     model = fake_model()
     graph = build_graph(model)
     result = await graph.ainvoke(turn("test"))
     assert [m.content for m in result["messages"]] == ["test", "You said: test"]
-    assert len(model.calls) == 1
-    assert await stages(graph, "test") == ["guard", "intent", "echo"]
+    assert len(model.calls) == 2
+    assert result["decision"] == {"action": "answer", "plan": ["answer briefly"]}
+    assert await stages(graph, "test") == ["guard", "intent", "reason", "echo"]
 
 
 async def test_guard_block_skips_the_model():
