@@ -4,12 +4,17 @@ graph.py — wires Simba's nodes into a LangGraph StateGraph.
 Where it sits: api.py calls `build_graph(model, checkpointer)` once at startup and keeps the
 compiled graph on `app.state.graph`; every chat turn runs through it via `graph.astream(...)`.
 
-Key idea, step 1: the graph is just START -> echo -> END, so the chat UI, SSE streaming and
-trace panel can all be built and tested before any real thinking node exists. Later steps
-(contracts.md § 8) replace `echo` with the real pipeline:
+Key idea: the graph is drawn one step at a time. Step 1 was START -> echo -> END. Step 2 puts the
+guard in front, with a *conditional edge* — a routing function LangGraph calls after a node to pick
+the next node by name:
+
+    START -> guard -+- pass ----> echo ---> END
+                    +- blocked -> refuse -> END
+
+Later steps (contracts.md § 8) replace `echo` with the real pipeline:
 
     START -> guard -+- pass -> intent -+- pass -> reason -> generate -> END
-                     +- blocked -> refuse    +- blocked -> refuse -> END
+                    +- blocked -> refuse    +- blocked -> refuse -> END
 """
 
 import time
@@ -21,6 +26,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from simba.common import emit_trace, text_of
+from simba.nodes.guard import guard
+from simba.nodes.refuse import refuse
 from simba.state import ChatState
 
 
@@ -41,6 +48,15 @@ async def echo(state: ChatState) -> dict:
     return {"messages": [AIMessage(f"You said: {text}")]}
 
 
+def after_guard(state: ChatState) -> str:
+    """Routing function for the edge after `guard`: "echo" if the message passed, else "refuse".
+
+    It only reads the verdict the guard just wrote — the decision itself lives in guard.py, so the
+    graph stays a plain map of "who runs next".
+    """
+    return "echo" if state["verdict"]["status"] == "pass" else "refuse"
+
+
 def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None = None) -> CompiledStateGraph:
     """Build and compile Simba's graph.
 
@@ -53,9 +69,23 @@ def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None =
                AsyncSqliteSaver so a chat remembers earlier turns.
 
     Returns: a compiled graph, ready for `.astream(...)` / `.ainvoke(...)`.
+
+    Steps:
+      1. Register the nodes by name.
+      2. START always goes to `guard`.
+      3. After `guard`, `after_guard` picks `echo` or `refuse` (a conditional edge).
+      4. Both `echo` and `refuse` end the turn.
     """
     graph = StateGraph(ChatState)
+    # 1. Nodes.
+    graph.add_node("guard", guard)
+    graph.add_node("refuse", refuse)
     graph.add_node("echo", echo)
-    graph.add_edge(START, "echo")
+    # 2. Every turn starts with the code guard.
+    graph.add_edge(START, "guard")
+    # 3. The list names every node `after_guard` may return, so LangGraph can draw and check the graph.
+    graph.add_conditional_edges("guard", after_guard, ["echo", "refuse"])
+    # 4. Both paths end the turn.
     graph.add_edge("echo", END)
+    graph.add_edge("refuse", END)
     return graph.compile(checkpointer=checkpointer)
