@@ -1,0 +1,4 @@
+@import 'tailwindcss';
+@plugin '@tailwindcss/typography';
+
+/* Simba's theme tokens are defined in step 1 (docs/contracts.md § 11). */
