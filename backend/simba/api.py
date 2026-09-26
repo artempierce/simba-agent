@@ -120,8 +120,8 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
              chunks as `trace` and `messages` chunks as `token` (only the generate node's actual
              answer text — other nodes' model calls are structured-output tool calls, not text
              the user should see).
-          4. If nothing became a `token` (e.g. echo's reply never goes through the model, so it
-             never streams as a "messages" chunk), fall back to the newest message: if it's this
+          4. If nothing became a `token` (e.g. the refuse node's fixed reply never goes through the
+             model, so it never streams as a "messages" chunk), fall back to the newest message: if it's this
              turn's AI reply (`type == "ai"` — the human message went in first, so an AI message
              at the end can only be from this turn), send its full text as one `token`;
              otherwise no reply was actually produced, so send `error` rather than letting the
@@ -161,7 +161,7 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
                             token_sent = True
                             yield sse("token", {"text": text})
 
-                # 4. No streamed token (e.g. echo, which never calls the model): fall back to the
+                # 4. No streamed token (e.g. refuse, which never calls the model): fall back to the
                 #    newest message, but only if it's really this turn's reply.
                 if not token_sent:
                     state = await graph.aget_state(config)
