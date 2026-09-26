@@ -6,10 +6,10 @@ compiled graph on `app.state.graph`; every chat turn runs through it via `graph.
 
 Key idea: the graph is drawn one step at a time. Step 1 was START -> echo -> END. Step 2 puts the
 guard in front, with a *conditional edge* — a routing function LangGraph calls after a node to pick
-the next node by name:
+the next node by name. Step 3 adds the LLM intent check as a second gate:
 
-    START -> guard -+- pass ----> echo ---> END
-                    +- blocked -> refuse -> END
+    START -> guard -+- pass -> intent -+- pass -> echo -> END
+                    +- blocked -> refuse    +- blocked -> refuse -> END
 
 Later steps (contracts.md § 8) replace `echo` with the real pipeline:
 
@@ -26,6 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
 from simba.common import emit_trace, text_of
+from simba.nodes import intent
 from simba.nodes.guard import guard
 from simba.nodes.refuse import refuse
 from simba.state import ChatState
@@ -49,11 +50,17 @@ async def echo(state: ChatState) -> dict:
 
 
 def after_guard(state: ChatState) -> str:
-    """Routing function for the edge after `guard`: "echo" if the message passed, else "refuse".
+    """Routing function for the edge after `guard`: "intent" if the message passed, else "refuse".
 
     It only reads the verdict the guard just wrote — the decision itself lives in guard.py, so the
     graph stays a plain map of "who runs next".
     """
+    return "intent" if state["verdict"]["status"] == "pass" else "refuse"
+
+
+def after_intent(state: ChatState) -> str:
+    """Routing function for the edge after `intent`: "echo" if the LLM check judged the message safe,
+    else "refuse". The intent node overwrites the guard's verdict, so this reads the newest one."""
     return "echo" if state["verdict"]["status"] == "pass" else "refuse"
 
 
@@ -71,21 +78,25 @@ def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None =
     Returns: a compiled graph, ready for `.astream(...)` / `.ainvoke(...)`.
 
     Steps:
-      1. Register the nodes by name.
+      1. Register the nodes by name. `intent` needs the model, so it's built by its factory.
       2. START always goes to `guard`.
-      3. After `guard`, `after_guard` picks `echo` or `refuse` (a conditional edge).
-      4. Both `echo` and `refuse` end the turn.
+      3. After `guard`, `after_guard` picks `intent` or `refuse` (a conditional edge).
+      4. After `intent`, `after_intent` picks `echo` or `refuse`.
+      5. Both `echo` and `refuse` end the turn.
     """
     graph = StateGraph(ChatState)
     # 1. Nodes.
     graph.add_node("guard", guard)
+    graph.add_node("intent", intent.make_node(model))
     graph.add_node("refuse", refuse)
     graph.add_node("echo", echo)
     # 2. Every turn starts with the code guard.
     graph.add_edge(START, "guard")
     # 3. The list names every node `after_guard` may return, so LangGraph can draw and check the graph.
-    graph.add_conditional_edges("guard", after_guard, ["echo", "refuse"])
-    # 4. Both paths end the turn.
+    graph.add_conditional_edges("guard", after_guard, ["intent", "refuse"])
+    # 4. The LLM safety check gets the second say.
+    graph.add_conditional_edges("intent", after_intent, ["echo", "refuse"])
+    # 5. Both paths end the turn.
     graph.add_edge("echo", END)
     graph.add_edge("refuse", END)
     return graph.compile(checkpointer=checkpointer)

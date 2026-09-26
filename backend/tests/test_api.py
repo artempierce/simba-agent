@@ -11,6 +11,7 @@ so `app.state.graph` / `.checkpointer` exist exactly as they would under uvicorn
 import json
 from contextlib import asynccontextmanager
 
+import pytest
 from httpx import ASGITransport, AsyncClient
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
@@ -58,7 +59,7 @@ async def test_health(tmp_path):
 
 
 async def test_chat_event_order_and_echo_fallback_token(tmp_path):
-    """One turn produces events in order start -> one trace per node (guard, echo) -> token -> done,
+    """One turn produces events in order start -> one trace per node (guard, intent, echo) -> token -> done,
     and since `echo` never streams through the model, its reply reaches the browser via the fallback
     token (contracts.md § 9's "if no token was sent" rule) — not a real streamed token."""
     async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (_app, client):
@@ -66,28 +67,30 @@ async def test_chat_event_order_and_echo_fallback_token(tmp_path):
         events = parse_sse(resp.text)
 
         names = [name for name, _ in events]
-        assert names == ["start", "trace", "trace", "token", "done"]
+        assert names == ["start", "trace", "trace", "trace", "token", "done"]
 
         _, start_data = events[0]
         assert start_data["title"] == "New chat"
         assert isinstance(start_data["chat_id"], str) and start_data["chat_id"]
 
-        assert [data["stage"] for name, data in events if name == "trace"] == ["guard", "echo"]
+        assert [data["stage"] for name, data in events if name == "trace"] == ["guard", "intent", "echo"]
 
-        _, token_data = events[3]
+        _, token_data = events[4]
         assert token_data == {"text": "You said: hello"}
 
 
 async def test_chat_done_totals(tmp_path):
-    """`done`'s totals are summed from the trace events: echo's trace carries no token usage
-    (it never calls the model), so both counts and the cost are zero, and `ms` is a real reading."""
+    """`done`'s totals are exactly the sums of the trace events' tokens and cost (the intent node's
+    fake-model call makes them non-zero), and `ms` is a real reading — so the footer in the trace
+    panel always agrees with the lines above it."""
     async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (_app, client):
         resp = await client.post("/api/chat", json={"message": "hi", "chat_id": None})
         events = parse_sse(resp.text)
         _, done_data = events[-1]
-        assert done_data["input_tokens"] == 0
-        assert done_data["output_tokens"] == 0
-        assert done_data["cost_usd"] == 0.0
+        traces = [data for name, data in events if name == "trace"]
+        assert done_data["input_tokens"] == sum(t["input_tokens"] for t in traces) > 0
+        assert done_data["output_tokens"] == sum(t["output_tokens"] for t in traces) > 0
+        assert done_data["cost_usd"] == pytest.approx(sum(t["cost_usd"] for t in traces))
         assert done_data["ms"] >= 0
 
 
@@ -154,8 +157,8 @@ async def test_chat_error_event_when_fallback_lookup_fails(monkeypatch, tmp_path
         resp = await client.post("/api/chat", json={"message": "hi", "chat_id": None})
         events = parse_sse(resp.text)
 
-        # guard and echo each emit one `trace` before the (now failing) fallback lookup runs.
-        assert [name for name, _ in events] == ["start", "trace", "trace", "error"]
+        # guard, intent and echo each emit one `trace` before the (now failing) fallback lookup runs.
+        assert [name for name, _ in events] == ["start", "trace", "trace", "trace", "error"]
         assert "state lookup boom" in events[-1][1]["message"]
 
 

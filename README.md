@@ -22,7 +22,7 @@ your message → guard (code rules) ─┬─ blocked → refuse (fixed reply)
 | 0 | Repo, contracts, core modules (model, state, schemas, prompts), CI | done |
 | 1 | Skeleton: chat UI + trace panel + echo node, SSE streaming | done |
 | 2 | Guard + refuse | done |
-| 3 | Intent check | planned |
+| 3 | Intent check | done |
 | 4 | Reason | planned |
 | 5 | Generate (first real Claude call after the owner's OK) | planned |
 | 6 | Chats sidebar: new, open, rename, delete | planned |
