@@ -59,7 +59,12 @@ export default function App() {
       onStart: (id) => setChatId(id),
       onTrace: (line) => updateLastRun((r) => ({ ...r, lines: [...r.lines, line] })),
       onToken: (t) => updateReply((m) => ({ ...m, content: m.content + t })),
-      onError: (message) => updateLastRun((r) => ({ ...r, error: message })),
+      onError: (message) => {
+        // The trace panel is hidden below 1024px (lg), so an error must also reach the reply
+        // bubble itself, or it would be invisible on narrow screens.
+        updateLastRun((r) => ({ ...r, error: message }))
+        updateReply((m) => ({ ...m, error: message }))
+      },
       onDone: (summary) => updateLastRun((r) => ({ ...r, summary })),
     })
     // 4.

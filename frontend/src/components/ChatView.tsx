@@ -22,7 +22,7 @@ type Props = {
  * 1. Show the greeting, or the message bubbles.
  * 2. Keep an empty marker after the last bubble, scrolled into view whenever messages change, so the
  *    newest text (including tokens streaming in) is always visible.
- * 3. The composer: Enter sends, Shift+Enter inserts a newline, disabled while an answer is streaming.
+ * 3. The composer: Enter sends, Shift+Enter inserts a newline, read-only while an answer is streaming.
  */
 export function ChatView({ messages, busy, onSend }: Props) {
   const [draft, setDraft] = useState('')
@@ -73,7 +73,12 @@ export function ChatView({ messages, busy, onSend }: Props) {
             rows={1}
             autoFocus
             value={draft}
-            disabled={busy}
+            // `readOnly` (not `disabled`) while busy: a disabled field is un-focusable, so the
+            // browser blurs it the moment a send starts — you'd have to click back in to keep
+            // typing. `readOnly` blocks edits without dropping focus; `submit()` already refuses to
+            // send while busy, and aria-disabled tells assistive tech the field isn't accepting input.
+            readOnly={busy}
+            aria-disabled={busy}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               // Enter sends; Shift+Enter adds a new line. isComposing is true mid-way through an
@@ -85,7 +90,7 @@ export function ChatView({ messages, busy, onSend }: Props) {
             }}
             placeholder="Ask Simba…"
             // field-sizing-content: the box grows with its text, up to max-h-48, then scrolls.
-            className="field-sizing-content max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 outline-none placeholder:text-muted disabled:opacity-60"
+            className={`field-sizing-content max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 outline-none placeholder:text-muted ${busy ? 'opacity-60' : ''}`}
           />
           <button
             type="submit"
@@ -104,7 +109,8 @@ export function ChatView({ messages, busy, onSend }: Props) {
 /**
  * One chat message: your own text right-aligned in a raised bubble; Simba's reply rendered as
  * Markdown (so lists, code and emphasis show properly); a pulsing status line while nothing has
- * streamed in for the reply yet.
+ * streamed in for the reply yet; an error note in the danger colour if streaming the reply failed
+ * (whatever text did stream in first, if any, is kept above it).
  */
 function Bubble({ message, waiting }: { message: Message; waiting: boolean }) {
   if (message.role === 'user') {
@@ -114,18 +120,31 @@ function Bubble({ message, waiting }: { message: Message; waiting: boolean }) {
       </div>
     )
   }
-  if (!message.content && waiting) {
+  if (!message.content && !message.error && waiting) {
     return (
       <div role="status" className="animate-pulse text-muted">
         Thinking…
       </div>
     )
   }
-  // `prose` (the Tailwind typography plugin) styles the HTML that Markdown produces to read well
-  // without a bubble around it, like a normal page of text.
+  // `prose-neutral` (the Tailwind typography plugin) styles the HTML that Markdown produces to read
+  // well without a bubble around it, like a normal page of text; links and code are then pulled back
+  // onto our own token colours instead of the plugin's built-in palette.
   return (
-    <div className="prose max-w-none min-w-0 prose-p:my-2 prose-pre:bg-bg" aria-live="polite">
-      <Markdown>{message.content}</Markdown>
+    <div>
+      {message.content && (
+        <div className="prose prose-neutral max-w-none min-w-0 prose-p:my-2 prose-pre:bg-bg prose-a:text-accent prose-code:text-ink">
+          <Markdown>{message.content}</Markdown>
+        </div>
+      )}
+      {/* aria-live only here, not on the div above: that div's content grows one token at a time,
+          and announcing every token would spam a screen reader. This line only ever appears once,
+          when streaming has already failed, so it's safe to announce. */}
+      {message.error && (
+        <p role="alert" aria-live="polite" className="mt-1 text-danger">
+          Couldn't get a reply: {message.error}
+        </p>
+      )}
     </div>
   )
 }

@@ -38,11 +38,14 @@ function formatTokens(n: number): string {
  * this session, newest at the bottom. `busy` marks whether the last run is still streaming — only it
  * may show "… running". Hidden below 1024px (Tailwind's `lg`): the trace panel is a bonus view, not
  * required to chat with Simba.
+ *
+ * 1. Keep the newest line in view as runs and lines are added.
+ * 2. Show the explanatory hint until the first message, then one RunBlock per Run.
  */
 export function TracePanel({ runs, busy }: { runs: Run[]; busy: boolean }) {
   const endRef = useRef<HTMLDivElement>(null)
 
-  // 1. Keep the newest line in view as runs and lines are added.
+  // 1.
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' })
   }, [runs])
@@ -56,6 +59,7 @@ export function TracePanel({ runs, busy }: { runs: Run[]; busy: boolean }) {
         Trace
       </header>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
+        {/* 2. */}
         {runs.length === 0 && (
           <p className="leading-relaxed text-term-dim">
             Send a message and each step Simba takes shows up here — the guard, the safety check, the plan and the

@@ -22,19 +22,57 @@ export type ChatHandlers = {
 }
 
 /**
+ * Parse one "event: name\ndata: {json}" block (its trailing blank line already stripped) and call
+ * the matching handler. Returns true for `done` and `error` — the two events that end a run — so
+ * streamChat below can tell a normal end from a stream that just stopped sending events.
+ */
+function dispatchEvent(block: string, handlers: ChatHandlers): boolean {
+  const name = block.match(/^event: (.*)$/m)?.[1]
+  const data = block.match(/^data: (.*)$/m)?.[1]
+  if (!name || !data) return false
+
+  // JSON.parse gets its own try/catch: malformed data is a server/proxy bug, not a dropped
+  // connection, so it's worth a distinct message rather than looking like a network failure.
+  let payload
+  try {
+    payload = JSON.parse(data)
+  } catch {
+    handlers.onError('Bad data from the server.')
+    return true // still ends the run — nothing after malformed data can be trusted
+  }
+
+  if (name === 'start') handlers.onStart(payload.chat_id, payload.title)
+  else if (name === 'trace') handlers.onTrace(payload)
+  else if (name === 'token') handlers.onToken(payload.text)
+  else if (name === 'error') {
+    handlers.onError(payload.message)
+    return true
+  } else if (name === 'done') {
+    handlers.onDone(payload)
+    return true
+  }
+  return false
+}
+
+/**
  * Send one message and stream the reply, calling the matching handler for every SSE event.
  * Resolves once the stream ends.
  *
  * `chatId` null starts a new chat; the `start` event reports the id the backend assigned it. Any
- * network or HTTP failure (backend down, non-2xx response, a dropped connection) is reported through
- * `onError` instead of throwing, so callers never need a try/catch around this call.
+ * failure — can't reach the backend, a non-2xx response, a dropped connection, malformed event data,
+ * or the stream closing without a `done`/`error` — is reported through `onError` instead of
+ * throwing, so callers never need a try/catch around this call.
  *
  * 1. POST the message. A request that never reaches the server, a non-ok status, or a response with
  *    no body all count as a failure.
- * 2. Decode the byte stream to text and read it piece by piece as it arrives.
+ * 2. Decode the byte stream to text and read it piece by piece as it arrives, normalising `\r\n` to
+ *    `\n` (SSE allows either line ending, but the parsing below only looks for `\n`).
  * 3. Network chunks don't line up with event boundaries, so text is collected in `buffer` and cut
- *    into complete "event: name\ndata: {json}\n\n" blocks as they finish; each block is dispatched
- *    to its matching handler.
+ *    into complete "event: name\ndata: {json}\n\n" blocks as they finish; each is dispatched to its
+ *    matching handler.
+ * 4. Once the connection closes, flush any final event left in `buffer` without its trailing blank
+ *    line (a server that closes right after its last write shouldn't lose that event), then — if
+ *    nothing dispatched a `done` or `error` — report that the stream ended unexpectedly.
  */
 export async function streamChat(message: string, chatId: string | null, handlers: ChatHandlers): Promise<void> {
   // 1.
@@ -57,29 +95,27 @@ export async function streamChat(message: string, chatId: string | null, handler
   // 2.
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader()
   let buffer = ''
+  let finished = false // set once dispatchEvent handles a `done` or `error`
   try {
     for (;;) {
       const { value, done } = await reader.read()
       if (done) break
-      buffer += value
+      buffer += value.replace(/\r\n/g, '\n')
 
       // 3. Each event ends with a blank line.
       let end: number
       while ((end = buffer.indexOf('\n\n')) >= 0) {
         const block = buffer.slice(0, end)
         buffer = buffer.slice(end + 2)
-        const name = block.match(/^event: (.*)$/m)?.[1]
-        const data = block.match(/^data: (.*)$/m)?.[1]
-        if (!name || !data) continue
-        const payload = JSON.parse(data)
-        if (name === 'start') handlers.onStart(payload.chat_id, payload.title)
-        else if (name === 'trace') handlers.onTrace(payload)
-        else if (name === 'token') handlers.onToken(payload.text)
-        else if (name === 'error') handlers.onError(payload.message)
-        else if (name === 'done') handlers.onDone(payload)
+        if (dispatchEvent(block, handlers)) finished = true
       }
     }
   } catch {
     handlers.onError('Lost connection to the backend.')
+    return
   }
+
+  // 4.
+  if (buffer.trim() && dispatchEvent(buffer, handlers)) finished = true
+  if (!finished) handlers.onError('The reply ended unexpectedly.')
 }

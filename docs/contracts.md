@@ -236,7 +236,7 @@ type TraceLine = { stage: string; status: 'ok' | 'blocked' | 'error'; detail: st
                    input_tokens: number; output_tokens: number; cost_usd: number }
 type RunSummary = { input_tokens: number; output_tokens: number; cost_usd: number; ms: number }
 type Run = { prompt: string; lines: TraceLine[]; summary?: RunSummary; error?: string }
-type Message = { role: 'user' | 'assistant'; content: string }
+type Message = { role: 'user' | 'assistant'; content: string; error?: string }
 type Chat = { id: string; title: string; created_at: string; updated_at: string }
 ```
 
