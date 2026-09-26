@@ -19,8 +19,8 @@ your message → guard (code rules) ─┬─ blocked → refuse (fixed reply)
 
 | Step | What | Status |
 |---|---|---|
-| 0 | Repo, contracts, core modules (model, state, schemas, prompts), CI | in progress |
-| 1 | Skeleton: chat UI + trace panel + echo node, SSE streaming | planned |
+| 0 | Repo, contracts, core modules (model, state, schemas, prompts), CI | done |
+| 1 | Skeleton: chat UI + trace panel + echo node, SSE streaming | done |
 | 2 | Guard + refuse | planned |
 | 3 | Intent check | planned |
 | 4 | Reason | planned |
@@ -48,10 +48,16 @@ simba-agent/
 ├── docs/contracts.md         interfaces between the parts
 ├── .github/workflows/ci.yml  tests on every pull request
 ├── backend/simba/
+│   ├── api.py                FastAPI app: POST /api/chat streams SSE events (start/trace/token/error/done)
+│   ├── graph.py              draws the graph: which nodes run, in what order
 │   ├── model.py              real Claude or the free fake model; cost per call
 │   ├── state.py              the graph's state
 │   ├── schemas.py            structured-output shapes (IntentCheck, Decision)
 │   ├── common.py             shared helpers, including the trace-line writer
 │   └── prompts/              Simba's procedural memory: system.md, intent.md, reason.md
-└── frontend/src/             the web app
+└── frontend/src/
+    ├── App.tsx               the page and all its state
+    ├── api.ts                streamChat: POST + a small SSE parser
+    ├── types.ts              shapes shared with the backend
+    └── components/           ChatView (messages + input), TracePanel (the dark right pane)
 ```

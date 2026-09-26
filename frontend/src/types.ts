@@ -22,8 +22,9 @@ export type RunSummary = { input_tokens: number; output_tokens: number; cost_usd
 /** One message's trace block: your prompt, its trace lines, then a summary or an error. */
 export type Run = { prompt: string; lines: TraceLine[]; summary?: RunSummary; error?: string }
 
-/** One chat bubble. */
-export type Message = { role: 'user' | 'assistant'; content: string }
+/** One chat bubble. `error` is set when streaming the reply failed (a network/HTTP failure or a
+ * mid-stream `error` event) — shown in the bubble instead of, or alongside, whatever text streamed. */
+export type Message = { role: 'user' | 'assistant'; content: string; error?: string }
 
 /** One chat in the sidebar (step 6). Times are ISO 8601 UTC strings. */
 export type Chat = { id: string; title: string; created_at: string; updated_at: string }
