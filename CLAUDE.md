@@ -38,8 +38,9 @@ model-based checks are an extra layer, never the only one. Fail closed on safety
 ## Workflow
 
 Work is split between a lead (plans, writes contracts, integrates, opens PRs) and builder agents
-(implement one task each, in their own worktree, touching only the files they own). Before any PR,
-the change is reviewed by two critics, and every finding is fixed or explicitly waived:
+(implement one task each, in their own worktree, touching only the files they own). To save tokens,
+related tickets are batched into one larger PR (e.g. `Closes #20, closes #21`), and that PR is
+reviewed once by two critics; every finding is fixed or explicitly waived:
 
 1. **Code expert (architecture)** — does it fit the design book and `docs/contracts.md`? Right layer,
    simplest design, no hidden coupling, security rule respected, correctness bugs.

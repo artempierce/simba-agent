@@ -93,7 +93,8 @@ per node in § 7. Keep details short
 
 ### § 7.1 `simba/guard.py` — pure rules, no LangGraph
 
-- `MAX_INPUT_CHARS = 4000`.
+- `MAX_INPUT_CHARS = 1000` (Sol lowered it from 4000 on 2026-09-27: keeps each message's cost and
+  latency small).
 - `INJECTION_RULES: dict[str, re.Pattern]` — port art-lab's rules
   (`/Users/sol/art-lab/backend/artlab/guards/input.py`) **with their explanatory comments**:
   `disable-safety`, `ignore-instructions`, `reveal-prompt`, `role-hijack`, `fake-tags`.
