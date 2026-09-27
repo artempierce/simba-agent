@@ -222,8 +222,12 @@ export default function App() {
 
   // Simba's face follows the most recent run (docs/visual-style.md → "Simba avatar"): the header
   // avatar and the empty-state avatar (inside ChatView) both show this same mood, so Simba never
-  // looks like two different cats at once.
-  const mood = moodFor(runs.at(-1), busy)
+  // looks like two different cats at once. `streaming` tells moodFor whether the reply that's
+  // currently being sent already has visible text — while busy is true but streaming is false Simba
+  // is still "thinking"; once text starts arriving he's "talking". The last message is that in-progress
+  // reply (App always adds it, empty, the moment a send starts — see send()'s step 1).
+  const streaming = busy && !!messages.at(-1)?.content
+  const mood = moodFor(runs.at(-1), busy, streaming)
 
   return (
     <div className="grid h-full grid-rows-[auto_1fr] bg-bg">
@@ -264,7 +268,7 @@ export default function App() {
             </div>
           )}
           <div className="min-h-0 flex-1">
-            <ChatView messages={messages} busy={busy} mood={mood} onSend={send} />
+            <ChatView messages={messages} runs={runs} busy={busy} mood={mood} onSend={send} />
           </div>
         </div>
         <TracePanel runs={runs} busy={busy} />

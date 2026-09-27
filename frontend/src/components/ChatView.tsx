@@ -10,12 +10,13 @@ import { useEffect, useRef, useState } from 'react'
 import Markdown from 'react-markdown'
 import { Fish, Paw, Whiskers, Yarn, DoodleBand } from './Doodles'
 import { SimbaAvatar } from './SimbaAvatar'
-import type { Mood } from '../mood'
-import type { Message } from '../types'
+import { moodFor, type Mood } from '../mood'
+import type { Message, Run } from '../types'
 import type { ComponentType } from 'react'
 
 type Props = {
   messages: Message[] // bubbles to show
+  runs: Run[] // one per exchange, for each reply's own avatar mood (see the mapping note below)
   busy: boolean // an answer is streaming; sending is disabled
   mood: Mood // Simba's current mood, for the empty state's avatar
   onSend: (text: string) => void // called with the trimmed message to send
@@ -30,7 +31,7 @@ type Props = {
  *    newest text (including tokens streaming in) is always visible.
  * 3. The composer: Enter sends, Shift+Enter inserts a newline, read-only while an answer is streaming.
  */
-export function ChatView({ messages, busy, mood, onSend }: Props) {
+export function ChatView({ messages, runs, busy, mood, onSend }: Props) {
   const [draft, setDraft] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
 
@@ -54,8 +55,18 @@ export function ChatView({ messages, busy, mood, onSend }: Props) {
           {messages.length === 0 ? (
             <EmptyState mood={mood} onSend={submit} />
           ) : (
-            // Only the last bubble can be "waiting" (the reply that's currently streaming in).
-            messages.map((m, i) => <Bubble key={i} message={m} waiting={busy && i === messages.length - 1} />)
+            // Each exchange is a user bubble immediately followed by its assistant reply (App.tsx's
+            // send() pushes both together, then one Run) — so message index i's Run is
+            // runs[Math.floor(i / 2)]: messages 0 & 1 share run 0, messages 2 & 3 share run 1, and so
+            // on. Only the very last bubble can still be streaming; every earlier reply is finished,
+            // so its own Run (not App's global busy/mood) decides its avatar's face.
+            messages.map((m, i) => {
+              const isLast = i === messages.length - 1
+              const waiting = busy && isLast
+              const run = runs[Math.floor(i / 2)]
+              const avatarMood = moodFor(run, waiting, waiting && !!m.content)
+              return <Bubble key={i} message={m} waiting={waiting} avatarMood={avatarMood} />
+            })
           )}
           <div ref={endRef} />
         </div>
@@ -69,7 +80,10 @@ export function ChatView({ messages, busy, mood, onSend }: Props) {
         }}
         className="border-t border-rule px-6 py-4"
       >
-        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border-[1.5px] border-ink bg-surface p-2 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ink">
+        {/* One ink line, not two: a separate focus outline drawn outside this 1.5px border (even with
+            an offset) reads as a heavy double ring. Thickening the same border on focus-within keeps
+            it a single clear line instead. */}
+        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border-[1.5px] border-ink bg-surface p-2 focus-within:border-2">
           <label htmlFor="composer" className="sr-only">
             Message
           </label>
@@ -117,11 +131,11 @@ export function ChatView({ messages, busy, mood, onSend }: Props) {
  * line while nothing has streamed in for the reply yet; an error note in the danger colour if
  * streaming the reply failed (whatever text did stream in first, if any, is kept above it).
  *
- * The reply's avatar picks its own small mood from this one message only (busy/error), rather than
- * taking App's global `mood` prop — a past, finished reply should always look `happy` (or `dizzy` if
- * it errored), never flip moods just because a *later* message is now streaming.
+ * `avatarMood` comes from the caller (ChatView, via `moodFor` on this message's own Run) rather than
+ * being computed here — a past, finished reply should always look grumpy/suspicious/dizzy/happy
+ * exactly as its own run went, never flip moods just because a *later* message is now streaming.
  */
-function Bubble({ message, waiting }: { message: Message; waiting: boolean }) {
+function Bubble({ message, waiting, avatarMood }: { message: Message; waiting: boolean; avatarMood: Mood }) {
   if (message.role === 'user') {
     return (
       <div className="ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-sky px-4 py-2.5 whitespace-pre-wrap text-ink">
@@ -129,7 +143,6 @@ function Bubble({ message, waiting }: { message: Message; waiting: boolean }) {
       </div>
     )
   }
-  const avatarMood = message.error ? 'dizzy' : waiting ? 'thinking' : 'happy'
   return (
     <div className="flex items-start gap-2.5">
       <SimbaAvatar mood={avatarMood} size={28} />
