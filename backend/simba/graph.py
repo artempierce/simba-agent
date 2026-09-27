@@ -8,14 +8,15 @@ Key idea: the graph is only a map of "who runs next". Each node does one job and
 into the state; *conditional edges* — routing functions LangGraph calls after a node to pick the
 next node by name — read that result and choose the path:
 
-    START -> guard -+- pass -> intent -+- pass -> reason -> generate -> END
+    START -> guard -+- pass -> intent -+- pass -> reason -> generate -> output_guard -> END
                     +- blocked -> refuse    +- blocked -> refuse -> END
 
-  guard     code rules (size + injection patterns), no model, $0        nodes/guard.py
-  intent    LLM: restate the request + safety verdict (second gate)     nodes/intent.py
-  reason    LLM: choose the action (answer / clarify) and plan it        nodes/reason.py
-  generate  LLM: write the reply, streamed to the browser                nodes/generate.py
-  refuse    fixed reply, no model, $0                                     nodes/refuse.py
+  guard         code rules (size + injection patterns) + local classifier, $0   nodes/guard.py
+  intent        LLM: restate the request + safety verdict (second gate)         nodes/intent.py
+  reason        LLM: choose the action (answer / clarify) and plan it            nodes/reason.py
+  generate      LLM: write the reply, streamed to the browser                    nodes/generate.py
+  output_guard  code checks on the finished reply; retracts leaks, $0 (#15)      nodes/output_guard.py
+  refuse        fixed reply, no model, $0                                         nodes/refuse.py
 
 The MVP was drawn one step at a time: step 1 was START -> echo -> END, step 2 added the guard,
 step 3 the intent check, step 4 reason, and step 5 replaced the echo placeholder with generate.
@@ -30,6 +31,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from simba.classifier import InjectionClassifier
 from simba.nodes import generate, guard, intent, reason
+from simba.nodes.output_guard import output_guard
 from simba.nodes.refuse import refuse
 from simba.state import ChatState
 
@@ -74,7 +76,8 @@ def build_graph(
       3. After `guard`, `after_guard` picks `intent` or `refuse` (a conditional edge).
       4. After `intent`, `after_intent` picks `reason` or `refuse`.
       5. `reason` always goes on to `generate` (a plain edge: there's only one way forward today).
-      6. Both `generate` and `refuse` end the turn.
+      6. Every generated reply is checked by `output_guard` (#15) before the turn ends.
+      7. Both `output_guard` and `refuse` end the turn (refuse's fixed text needs no checking).
     """
     graph = StateGraph(ChatState)
     # 1. Nodes.
@@ -82,6 +85,7 @@ def build_graph(
     graph.add_node("intent", intent.make_node(model))
     graph.add_node("reason", reason.make_node(model))
     graph.add_node("generate", generate.make_node(model))
+    graph.add_node("output_guard", output_guard)
     graph.add_node("refuse", refuse)
     # 2. Every turn starts with the code guard.
     graph.add_edge(START, "guard")
@@ -91,7 +95,9 @@ def build_graph(
     graph.add_conditional_edges("intent", after_intent, ["reason", "refuse"])
     # 5. Plan, then reply.
     graph.add_edge("reason", "generate")
-    # 6. Both paths end the turn.
-    graph.add_edge("generate", END)
+    # 6. Check what Simba wrote.
+    graph.add_edge("generate", "output_guard")
+    # 7. Both paths end the turn.
+    graph.add_edge("output_guard", END)
     graph.add_edge("refuse", END)
     return graph.compile(checkpointer=checkpointer)

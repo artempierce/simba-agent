@@ -33,6 +33,7 @@ const STAGE_PILL: Record<string, string> = {
   intent: 'bg-sky',
   reason: 'bg-blush',
   generate: 'bg-mint',
+  output_guard: 'bg-butter', // same colour as guard: both are code checks (#15 checks what Simba wrote)
   refuse: 'bg-coral',
 }
 
@@ -105,7 +106,7 @@ function RunBlock({ run, running }: { run: Run; running: boolean }) {
       </ul>
       {run.summary && (
         <div className="mt-2 border-t border-dashed border-rule pt-2 text-muted tabular-nums">
-          {formatTokens(run.summary.input_tokens + run.summary.output_tokens)} tok · $
+          {formatTokens(run.summary.input_tokens)} in · {formatTokens(run.summary.output_tokens)} out · $
           {run.summary.cost_usd.toFixed(4)} · {(run.summary.ms / 1000).toFixed(1)}s
         </div>
       )}
@@ -134,6 +135,12 @@ function TraceLineRow({ line }: { line: TraceLine }) {
         <span className={`ml-auto tabular-nums ${isProblem ? 'text-ink' : 'text-muted'}`}>{line.ms}ms</span>
       </div>
       <div className="mt-1 pl-6 break-words">{line.detail}</div>
+      {/* Only lines that called the model have tokens: show what went in (the prompt) and came out. */}
+      {line.input_tokens + line.output_tokens > 0 && (
+        <div className="pl-6 text-muted tabular-nums">
+          {formatTokens(line.input_tokens)} in · {formatTokens(line.output_tokens)} out · ${line.cost_usd.toFixed(4)}
+        </div>
+      )}
     </li>
   )
 }

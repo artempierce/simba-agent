@@ -1,0 +1,347 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Simba API",
+    "version": "0.1.0",
+    "description": "The HTTP API between Simba's web page and its backend. Built from docs/contracts.md § 6, § 9 and § 10 — if this file and the contract disagree, fix one of them in the same change. POST /api/chat answers with Server-Sent Events (SSE): a long-lived text/event-stream response made of blocks `event: <name>\\ndata: <json>\\n\\n`. OpenAPI can't express an event stream natively, so the `SseEvent` schema lists every event and its `data` shape, and `x-sse-events` on that response gives the order. The spec is checked in CI by backend/tests/test_api_spec.py (valid OpenAPI, and the same paths and methods as the real FastAPI app)."
+  },
+  "servers": [
+    { "url": "http://localhost:8000", "description": "Local backend (uvicorn simba.api:app). The Vite dev server on :5173 proxies /api here." }
+  ],
+  "tags": [
+    { "name": "chat", "description": "Send a message and stream Simba's work and answer." },
+    { "name": "chats", "description": "The sidebar's chat list: list, create, open, rename, delete." },
+    { "name": "health", "description": "Liveness." }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": ["health"],
+        "operationId": "health",
+        "summary": "Liveness check",
+        "description": "Answers without touching the graph or storage.",
+        "responses": {
+          "200": {
+            "description": "The server is up.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" } } }
+          }
+        }
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "tags": ["chat"],
+        "operationId": "chat",
+        "summary": "Send one message; stream the turn back as SSE",
+        "description": "Runs one turn of the graph (guard → intent → reason → generate → output_guard, or → refuse). `chat_id: null` starts a new chat titled from this message; a known id continues that chat and moves it to the top; an unknown id is refused with 404 before any streaming, so client text never becomes a database key. Each turn's run (prompt, trace lines, totals or error) is saved with the chat, even if the client disconnects mid-answer.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChatRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "The turn as a stream of SSE blocks. Order: `start` (once, first) → `trace` (one per node) and `token` (answer text as it streams) → `replace` (only if the output guard retracted the answer) → `done` (once, last). On an exception after `start`, `error` replaces `done` and ends the stream.",
+            "x-sse-events": ["start", "trace", "token", "replace", "error", "done"],
+            "content": {
+              "text/event-stream": {
+                "schema": { "$ref": "#/components/schemas/SseEvent" },
+                "example": "event: start\ndata: {\"chat_id\": \"3f2a9c1e5b7d4e8a9c217d4e5f6a8b90\", \"title\": \"Plan a cozy weekend\"}\n\nevent: trace\ndata: {\"stage\": \"guard\", \"status\": \"ok\", \"detail\": \"pass · 19 chars · classifier 0.01\", \"ms\": 12, \"input_tokens\": 0, \"output_tokens\": 0, \"cost_usd\": 0.0}\n\nevent: token\ndata: {\"text\": \"Here \"}\n\nevent: done\ndata: {\"input_tokens\": 610, \"output_tokens\": 59, \"cost_usd\": 0.000905, \"ms\": 2140}\n\n"
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/ChatNotFound" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/api/chats": {
+      "get": {
+        "tags": ["chats"],
+        "operationId": "listChats",
+        "summary": "List chats, newest activity first",
+        "responses": {
+          "200": {
+            "description": "Every chat, ordered by `updated_at` descending (ties: most recently created first).",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Chat" } } } }
+          }
+        }
+      },
+      "post": {
+        "tags": ["chats"],
+        "operationId": "createChat",
+        "summary": "Create an empty chat",
+        "description": "The web page doesn't use this — it lets POST /api/chat create the chat on its first message — but the endpoint exists for tools and tests.",
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CreateChatBody" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "The new chat.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Chat" } } }
+          },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/api/chats/{chat_id}": {
+      "parameters": [
+        {
+          "name": "chat_id",
+          "in": "path",
+          "required": true,
+          "description": "The chat's id (uuid4 hex), from `start` or from GET /api/chats.",
+          "schema": { "type": "string" }
+        }
+      ],
+      "get": {
+        "tags": ["chats"],
+        "operationId": "getChat",
+        "summary": "Open one chat: its messages and its trace runs",
+        "responses": {
+          "200": {
+            "description": "The chat, its conversation (user and assistant messages only, from the checkpointer) and one run per turn, oldest first.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChatDetail" } } }
+          },
+          "404": { "$ref": "#/components/responses/ChatNotFound" }
+        }
+      },
+      "patch": {
+        "tags": ["chats"],
+        "operationId": "renameChat",
+        "summary": "Rename a chat",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RenameChatBody" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "The renamed chat.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Chat" } } }
+          },
+          "404": { "$ref": "#/components/responses/ChatNotFound" },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      },
+      "delete": {
+        "tags": ["chats"],
+        "operationId": "deleteChat",
+        "summary": "Delete a chat, its runs and its saved conversation",
+        "responses": {
+          "204": { "description": "Deleted. The checkpointer thread is removed first, then the chat row and its runs." },
+          "404": { "$ref": "#/components/responses/ChatNotFound" }
+        }
+      }
+    }
+  },
+  "components": {
+    "responses": {
+      "ChatNotFound": {
+        "description": "No chat with that id.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorDetail" },
+            "example": { "detail": "chat not found" }
+          }
+        }
+      },
+      "ValidationError": {
+        "description": "The request body didn't match its schema (FastAPI's standard validation error).",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HTTPValidationError" } } }
+      }
+    },
+    "schemas": {
+      "Health": {
+        "type": "object",
+        "required": ["ok"],
+        "properties": { "ok": { "type": "boolean", "const": true } }
+      },
+      "ChatRequest": {
+        "type": "object",
+        "description": "The body of POST /api/chat.",
+        "required": ["message"],
+        "properties": {
+          "message": { "type": "string", "description": "What the user typed. The guard refuses anything over 1,000 characters (a `trace` + fixed reply, not an HTTP error)." },
+          "chat_id": { "type": ["string", "null"], "default": null, "description": "The chat this continues; null starts a new chat." }
+        }
+      },
+      "CreateChatBody": {
+        "type": "object",
+        "properties": {
+          "title": { "type": ["string", "null"], "maxLength": 80, "description": "Trimmed; blank or missing → \"New chat\"; over 80 characters after trimming → 422." }
+        }
+      },
+      "RenameChatBody": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 80, "description": "Trimmed; must be 1–80 characters after trimming, else 422." }
+        }
+      },
+      "Chat": {
+        "type": "object",
+        "description": "One row in the sidebar. Times are ISO 8601 UTC.",
+        "required": ["id", "title", "created_at", "updated_at"],
+        "properties": {
+          "id": { "type": "string", "examples": ["3f2a9c1e5b7d4e8a9c217d4e5f6a8b90"] },
+          "title": { "type": "string", "maxLength": 80, "description": "From the first message (cut to 40 characters + \"…\"), or a rename." },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time", "description": "Bumped on every new message; the list is sorted by it." }
+        }
+      },
+      "Message": {
+        "type": "object",
+        "required": ["role", "content"],
+        "properties": {
+          "role": { "type": "string", "enum": ["user", "assistant"] },
+          "content": { "type": "string" }
+        }
+      },
+      "ChatDetail": {
+        "type": "object",
+        "required": ["chat", "messages", "runs"],
+        "properties": {
+          "chat": { "$ref": "#/components/schemas/Chat" },
+          "messages": { "type": "array", "items": { "$ref": "#/components/schemas/Message" } },
+          "runs": { "type": "array", "items": { "$ref": "#/components/schemas/Run" } }
+        }
+      },
+      "Run": {
+        "type": "object",
+        "description": "One turn's trace block, saved with the chat. Exactly one of `summary` / `error` is set.",
+        "required": ["prompt", "lines", "summary", "error"],
+        "properties": {
+          "prompt": { "type": "string", "description": "The user message that started the turn." },
+          "lines": { "type": "array", "items": { "$ref": "#/components/schemas/TraceLine" } },
+          "summary": { "oneOf": [{ "$ref": "#/components/schemas/RunSummary" }, { "type": "null" }] },
+          "error": { "type": ["string", "null"], "description": "Why the turn failed, e.g. \"interrupted before the reply finished\"." }
+        }
+      },
+      "TraceStage": {
+        "type": "string",
+        "description": "Which graph node wrote the line (contracts.md § 6).",
+        "enum": ["guard", "intent", "reason", "generate", "output_guard", "refuse"]
+      },
+      "TraceStatus": {
+        "type": "string",
+        "description": "ok = passed; blocked = stopped or retracted; error = the node failed; flagged = passed, but the local classifier raised a flag (⚑) for the intent check to weigh.",
+        "enum": ["ok", "blocked", "error", "flagged"]
+      },
+      "TraceLine": {
+        "type": "object",
+        "description": "One line in the trace panel: what one node did (backend: common.emit_trace).",
+        "required": ["stage", "status", "detail", "ms", "input_tokens", "output_tokens", "cost_usd"],
+        "properties": {
+          "stage": { "$ref": "#/components/schemas/TraceStage" },
+          "status": { "$ref": "#/components/schemas/TraceStatus" },
+          "detail": { "type": "string", "maxLength": 80, "description": "One short line, e.g. \"safe · \\\"weekend ideas for Lisbon\\\"\". Never contains the system prompt." },
+          "ms": { "type": "integer", "minimum": 0 },
+          "input_tokens": { "type": "integer", "minimum": 0 },
+          "output_tokens": { "type": "integer", "minimum": 0 },
+          "cost_usd": { "type": "number", "minimum": 0 }
+        }
+      },
+      "RunSummary": {
+        "type": "object",
+        "description": "A turn's totals, summed from its trace lines.",
+        "required": ["input_tokens", "output_tokens", "cost_usd", "ms"],
+        "properties": {
+          "input_tokens": { "type": "integer", "minimum": 0 },
+          "output_tokens": { "type": "integer", "minimum": 0 },
+          "cost_usd": { "type": "number", "minimum": 0 },
+          "ms": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "SseEvent": {
+        "description": "One SSE block from POST /api/chat. `event` is the block's `event:` line; `data` is its JSON `data:` line.",
+        "oneOf": [
+          { "$ref": "#/components/schemas/StartEvent" },
+          { "$ref": "#/components/schemas/TraceEvent" },
+          { "$ref": "#/components/schemas/TokenEvent" },
+          { "$ref": "#/components/schemas/ReplaceEvent" },
+          { "$ref": "#/components/schemas/ErrorEvent" },
+          { "$ref": "#/components/schemas/DoneEvent" }
+        ],
+        "discriminator": { "propertyName": "event" }
+      },
+      "StartEvent": {
+        "type": "object",
+        "description": "First, always: which chat this turn belongs to (a new one if chat_id was null).",
+        "required": ["event", "data"],
+        "properties": {
+          "event": { "const": "start" },
+          "data": {
+            "type": "object",
+            "required": ["chat_id", "title"],
+            "properties": { "chat_id": { "type": "string" }, "title": { "type": "string" } }
+          }
+        }
+      },
+      "TraceEvent": {
+        "type": "object",
+        "description": "One per graph node, as it finishes.",
+        "required": ["event", "data"],
+        "properties": { "event": { "const": "trace" }, "data": { "$ref": "#/components/schemas/TraceLine" } }
+      },
+      "TokenEvent": {
+        "type": "object",
+        "description": "A piece of the answer as it streams (only the generate node's text). A refusal, which calls no model, arrives as one token with the whole fixed reply.",
+        "required": ["event", "data"],
+        "properties": {
+          "event": { "const": "token" },
+          "data": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } } }
+        }
+      },
+      "ReplaceEvent": {
+        "type": "object",
+        "description": "#15: the output guard retracted the answer after it streamed. The page replaces the whole reply with `text` (the saved history already holds only `text`).",
+        "required": ["event", "data"],
+        "properties": {
+          "event": { "const": "replace" },
+          "data": {
+            "type": "object",
+            "required": ["text"],
+            "properties": { "text": { "type": "string", "examples": ["I can't share that. Let's talk about something else."] } }
+          }
+        }
+      },
+      "ErrorEvent": {
+        "type": "object",
+        "description": "Something failed after `start`; the stream ends here (no `done`).",
+        "required": ["event", "data"],
+        "properties": {
+          "event": { "const": "error" },
+          "data": { "type": "object", "required": ["message"], "properties": { "message": { "type": "string" } } }
+        }
+      },
+      "DoneEvent": {
+        "type": "object",
+        "description": "Last, on success: the turn's totals.",
+        "required": ["event", "data"],
+        "properties": { "event": { "const": "done" }, "data": { "$ref": "#/components/schemas/RunSummary" } }
+      },
+      "ErrorDetail": {
+        "type": "object",
+        "required": ["detail"],
+        "properties": { "detail": { "type": "string" } }
+      },
+      "HTTPValidationError": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["loc", "msg", "type"],
+              "properties": {
+                "loc": { "type": "array", "items": { "oneOf": [{ "type": "string" }, { "type": "integer" }] } },
+                "msg": { "type": "string" },
+                "type": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

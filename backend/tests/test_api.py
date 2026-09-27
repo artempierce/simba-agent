@@ -76,7 +76,7 @@ async def test_chat_event_order_and_streamed_answer(tmp_path):
         assert start_data["title"] == "hello"  # a new chat is titled from its first message
         assert isinstance(start_data["chat_id"], str) and start_data["chat_id"]
 
-        assert [data["stage"] for name, data in events if name == "trace"] == ["guard", "intent", "reason", "generate"]
+        assert [data["stage"] for name, data in events if name == "trace"] == ["guard", "intent", "reason", "generate", "output_guard"]
 
         tokens = [data["text"] for name, data in events if name == "token"]
         assert len(tokens) > 1
@@ -294,7 +294,7 @@ async def test_first_message_creates_the_sidebar_chat_and_saves_its_run(tmp_path
         ]
         [run] = opened["runs"]
         assert run["prompt"] == "plan my weekend"
-        assert [line["stage"] for line in run["lines"]] == ["guard", "intent", "reason", "generate"]
+        assert [line["stage"] for line in run["lines"]] == ["guard", "intent", "reason", "generate", "output_guard"]
         assert run["summary"] == events[-1][1] and run["error"] is None
 
 

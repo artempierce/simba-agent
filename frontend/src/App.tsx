@@ -130,6 +130,8 @@ export default function App() {
       },
       onTrace: (line) => updateLastRun((r) => ({ ...r, lines: [...r.lines, line] })),
       onToken: (t) => updateReply((m) => ({ ...m, content: m.content + t })),
+      // Retracted by the output guard (#15): replace, don't append — the streamed text must go.
+      onReplace: (t) => updateReply((m) => ({ ...m, content: t })),
       onError: (message) => {
         // The trace panel is hidden below 1024px (lg), so an error must also reach the reply
         // bubble itself, or it would be invisible on narrow screens.

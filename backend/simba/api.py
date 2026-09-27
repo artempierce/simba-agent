@@ -25,7 +25,8 @@ blocks, each shaped like
 
 The browser reads them one at a time (frontend's streamChat, contracts.md § 11). Five event types
 exist, always in this order for one turn: `start` (once, first) -> any number of `trace` -> any
-number of `token` -> `done` (once, last) — or `error` instead of `done` if the graph raised.
+number of `token` -> `done` (once, last) — or `error` instead of `done` if the graph raised. A sixth,
+`replace`, comes just before `done` only when the output guard retracted the answer (#15).
 """
 
 import json
@@ -48,6 +49,7 @@ from simba.classifier import InjectionClassifier, load_classifier
 from simba.common import ms_since, text_of
 from simba.graph import build_graph
 from simba.model import cost_usd, make_model
+from simba.output_guard import RETRACT_TEXT
 
 # backend/.env holds SIMBA_FAKE_LLM / ANTHROPIC_API_KEY (git-ignored: the repo is public).
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -158,6 +160,7 @@ def create_app(
              at the end can only be from this turn), send its full text as one `token`;
              otherwise no reply was actually produced, so send `error` rather than letting the
              user's own message come back disguised as an answer.
+             4b. If the output guard retracted the answer, send `replace` with the fixed reply.
           5. Send `done` with totals summed from the `trace` events. Steps 3-4 share one
              try/except so *any* exception after `start` — from the graph itself, or from step
              4's own state lookup — becomes an `error` event instead of the stream just stopping.
@@ -226,6 +229,7 @@ def create_app(
             }
             tokens_in = tokens_out = 0
             token_sent = False
+            retracted = False  # set when the output guard (#15) retracts this turn's answer
             try:
                 # 3. Run the graph, forwarding trace lines and the generate node's answer text.
                 async for mode, chunk in graph.astream(turn_input, config, stream_mode=["messages", "custom"]):
@@ -233,6 +237,8 @@ def create_app(
                         tokens_in += chunk.get("input_tokens", 0)
                         tokens_out += chunk.get("output_tokens", 0)
                         lines.append(chunk)
+                        if chunk.get("stage") == "output_guard" and chunk.get("status") == "blocked":
+                            retracted = True
                         yield sse("trace", chunk)
                     else:
                         message, metadata = chunk
@@ -251,6 +257,12 @@ def create_app(
                         await save_run(None, "no reply was produced")
                         yield sse("error", {"message": "no reply was produced"})
                         return
+
+                # 4b. The output guard retracted the answer (#15). The page has already shown the
+                #     streamed text, so tell it to swap the bubble for the fixed reply. (The saved
+                #     history was already overwritten by the node itself.)
+                if retracted:
+                    yield sse("replace", {"text": RETRACT_TEXT})
             except Exception as exc:
                 message = f"{type(exc).__name__}: {exc}"
                 await save_run(None, message)
