@@ -3,7 +3,7 @@
  * they share (docs/contracts.md § 11).
  *
  *   ┌────────────────────────────────────────────────────────────┐
- *   │ Header: [Chats (< md)]  Simba                               │
+ *   │ Header: Simba                              [Chats (< md)]   │
  *   ├──────────┬─────────────────────────────────┬────────────────┤
  *   │ Sidebar  │ ChatView (messages + input)     │ TracePanel     │
  *   │ (≥ md)   │                                 │ (≥ lg)         │

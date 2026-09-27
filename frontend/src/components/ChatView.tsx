@@ -16,7 +16,7 @@ import type { ComponentType } from 'react'
 
 type Props = {
   messages: Message[] // bubbles to show
-  runs: Run[] // one per exchange, for each reply's own avatar mood (see the mapping note below)
+  runs: Run[] // one per turn, for each reply's own avatar mood (see runForEachMessage)
   busy: boolean // an answer is streaming; sending is disabled
   mood: Mood // Simba's current mood, for the empty state's avatar
   onSend: (text: string) => void // called with the trimmed message to send
@@ -34,6 +34,7 @@ type Props = {
 export function ChatView({ messages, runs, busy, mood, onSend }: Props) {
   const [draft, setDraft] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
+  const runOf = runForEachMessage(messages, runs) // runOf[i] = the run of message i's turn (replies only)
 
   // 2.
   useEffect(() => {
@@ -55,16 +56,13 @@ export function ChatView({ messages, runs, busy, mood, onSend }: Props) {
           {messages.length === 0 ? (
             <EmptyState mood={mood} onSend={submit} />
           ) : (
-            // Each exchange is a user bubble immediately followed by its assistant reply (App.tsx's
-            // send() pushes both together, then one Run) — so message index i's Run is
-            // runs[Math.floor(i / 2)]: messages 0 & 1 share run 0, messages 2 & 3 share run 1, and so
-            // on. Only the very last bubble can still be streaming; every earlier reply is finished,
-            // so its own Run (not App's global busy/mood) decides its avatar's face.
+            // Each reply's avatar shows the mood of its OWN run (see runForEachMessage below). Only the
+            // very last bubble can still be streaming; every earlier reply is finished, so its run —
+            // not App's live busy flag — decides its face.
             messages.map((m, i) => {
               const isLast = i === messages.length - 1
               const waiting = busy && isLast
-              const run = runs[Math.floor(i / 2)]
-              const avatarMood = moodFor(run, waiting, waiting && !!m.content)
+              const avatarMood = moodFor(runOf[i], waiting, waiting && !!m.content)
               return <Bubble key={i} message={m} waiting={waiting} avatarMood={avatarMood} />
             })
           )}
@@ -80,10 +78,10 @@ export function ChatView({ messages, runs, busy, mood, onSend }: Props) {
         }}
         className="border-t border-rule px-6 py-4"
       >
-        {/* One ink line, not two: a separate focus outline drawn outside this 1.5px border (even with
-            an offset) reads as a heavy double ring. Thickening the same border on focus-within keeps
-            it a single clear line instead. */}
-        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border-[1.5px] border-ink bg-surface p-2 focus-within:border-2">
+        {/* Focus: one ink line, not two — a separate focus outline outside this 1.5px border reads as
+            a heavy double ring. Instead the same border thickens, and a soft sky-blue halo (`ring-4`,
+            a wide box-shadow, not a second black line) makes "you're typing here" easy to see. */}
+        <div className="mx-auto flex max-w-3xl items-end gap-2 rounded-2xl border-[1.5px] border-ink bg-surface p-2 focus-within:border-2 focus-within:ring-4 focus-within:ring-sky">
           <label htmlFor="composer" className="sr-only">
             Message
           </label>
@@ -126,6 +124,36 @@ export function ChatView({ messages, runs, busy, mood, onSend }: Props) {
 }
 
 /**
+ * Match every message to the run (trace block) of its turn, so a reply's avatar can show how that
+ * turn went. Returns an array the same length as `messages`; user messages get undefined.
+ *
+ * Why not just `runs[Math.floor(i / 2)]`? That assumes every turn left exactly one user message and
+ * one reply. A reopened chat breaks that: a turn that failed keeps its user message and its run (with
+ * an error) but has NO reply, so every later reply would pick up an earlier turn's run.
+ *
+ * Instead, count turns by user messages: every turn starts with exactly one user message and saves
+ * exactly one run, so the Nth user message's turn is runs[N]. A reply belongs to the turn of the user
+ * message just before it. As a safety check the run's `prompt` must equal that user message's text;
+ * if it doesn't (e.g. a run failed to save), the reply gets no run and shows a neutral face.
+ *
+ * Example: [user "a", user "b" (failed, no reply), assistant, ...] with runs [A, B]
+ *          → the assistant reply follows user "b", so it gets run B — not A.
+ */
+function runForEachMessage(messages: Message[], runs: Run[]): (Run | undefined)[] {
+  let turn = -1 // index of the current turn = number of user messages seen so far, minus one
+  let turnPrompt = ''
+  return messages.map((m) => {
+    if (m.role === 'user') {
+      turn += 1
+      turnPrompt = m.content
+      return undefined
+    }
+    const run = runs[turn]
+    return run && run.prompt === turnPrompt ? run : undefined
+  })
+}
+
+/**
  * One chat message: your own text right-aligned in a `sky` bubble; Simba's reply starts with a small
  * avatar and is rendered as Markdown (so lists, code and emphasis show properly); a pulsing status
  * line while nothing has streamed in for the reply yet; an error note in the danger colour if
@@ -145,7 +173,7 @@ function Bubble({ message, waiting, avatarMood }: { message: Message; waiting: b
   }
   return (
     <div className="flex items-start gap-2.5">
-      <SimbaAvatar mood={avatarMood} size={28} />
+      <SimbaAvatar mood={avatarMood} size={28} decorative />
       <div className="min-w-0 flex-1 pt-0.5">
         {!message.content && !message.error && waiting ? (
           <div role="status" className="animate-pulse text-muted">
@@ -184,7 +212,7 @@ function EmptyState({ mood, onSend }: { mood: Mood; onSend: (text: string) => vo
     <div className="relative overflow-hidden rounded-2xl pt-[6vh] pb-2">
       <DoodleBand />
       <div className="relative mx-auto flex max-w-xl flex-col items-center gap-3 rounded-2xl border-[1.5px] border-ink bg-surface px-6 py-8 text-center shadow-md">
-        <SimbaAvatar mood={mood} size={96} />
+        <SimbaAvatar mood={mood} size={96} decorative />
         <h2 className="font-serif text-3xl font-semibold tracking-tight text-balance">Hi, I'm Simba.</h2>
         <p className="text-muted">Ask me anything — I'll show every step I take in the trace panel on the right.</p>
       </div>

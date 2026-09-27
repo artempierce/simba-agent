@@ -177,10 +177,15 @@ const EXTRAS: Partial<Record<Mood, ReactNode>> = {
  *   3. tuft   — a scruffy three-spike tuft of hair on top (a wink at "Simba" the lion)
  *   4. whiskers and nose
  *   5. eyes, mouth and any extra for the mood
+ *
+ * `decorative`: set it where the avatar only repeats what's already on screen (next to each reply, the
+ * big one on the welcome card). It's then hidden from screen readers, so they don't announce
+ * "Simba the cat, happy" before every message; the header avatar keeps its label.
  */
-export function SimbaAvatar({ mood, size = 40 }: { mood: Mood; size?: number }) {
+export function SimbaAvatar({ mood, size = 40, decorative = false }: { mood: Mood; size?: number; decorative?: boolean }) {
+  const a11y = decorative ? { 'aria-hidden': true } : { role: 'img', 'aria-label': LABELS[mood] }
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64" role="img" aria-label={LABELS[mood]}>
+    <svg width={size} height={size} viewBox="0 0 64 64" {...a11y}>
       <style>{KEYFRAMES}</style>
       {/* Defaults for every shape inside: white fill, rounded ink lines. Shapes override as needed. */}
       <g fill="white" stroke="currentColor" strokeWidth={OUTLINE} strokeLinecap="round" strokeLinejoin="round">

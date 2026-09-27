@@ -124,11 +124,14 @@ function TraceLineRow({ line }: { line: TraceLine }) {
   return (
     <li className={`rounded-lg px-2 py-1.5 ${isProblem ? 'bg-coral/40' : ''}`}>
       <div className="flex items-center gap-2">
+        {/* The icon is for eyes; the sr-only word ("blocked", "flagged"…) is what a screen reader says. */}
         <span aria-hidden="true">{STATUS_ICON[line.status]}</span>
+        <span className="sr-only">{line.status}:</span>
         <span className={`rounded-full px-2 py-0.5 text-xs font-medium text-ink ${STAGE_PILL[line.stage] ?? 'bg-rule'}`}>
           {line.stage}
         </span>
-        <span className="ml-auto text-muted tabular-nums">{line.ms}ms</span>
+        {/* On a coral problem row, muted grey falls below 4.5:1 contrast, so the time goes ink there. */}
+        <span className={`ml-auto tabular-nums ${isProblem ? 'text-ink' : 'text-muted'}`}>{line.ms}ms</span>
       </div>
       <div className="mt-1 pl-6 break-words">{line.detail}</div>
     </li>
