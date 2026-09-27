@@ -108,7 +108,7 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
       <button
         type="button"
         onClick={onNew}
-        className="rounded-md border border-rule bg-surface px-3 py-2 text-left text-sm font-medium text-ink hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+        className="rounded-full bg-accent px-3 py-2 text-left text-sm font-medium text-accent-ink hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         + New chat
       </button>
@@ -141,7 +141,7 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
                   onBlur={() => saveRename(chat.id)}
                   maxLength={80}
                   aria-label={`Rename chat: ${chat.title}`}
-                  className="w-full rounded-md border border-accent bg-surface px-2 py-1.5 text-sm text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                  className="w-full rounded-xl border-[1.5px] border-ink bg-surface px-2 py-1.5 text-sm text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                 />
               </li>
             )
@@ -153,7 +153,7 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
               <li
                 key={chat.id}
                 data-chat-row={chat.id}
-                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm"
+                className="flex items-center gap-2 rounded-xl px-2 py-1.5 text-sm"
               >
                 <span className="min-w-0 flex-1 truncate text-muted">Delete this chat?</span>
                 <button
@@ -181,12 +181,12 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
           // 6. Normal row: title button (selects the chat) + "⋯" button (opens the menu below it).
           return (
             <li key={chat.id} data-chat-row={chat.id}>
-              <div className={`flex items-stretch rounded-md ${active ? 'bg-raised' : 'hover:bg-raised'}`}>
+              <div className={`flex items-stretch rounded-xl ${active ? 'bg-raised' : 'hover:bg-raised'}`}>
                 <button
                   type="button"
                   onClick={() => onSelect(chat.id)}
                   aria-current={active ? 'page' : undefined}
-                  className={`min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
+                  className={`min-w-0 flex-1 truncate rounded-xl px-2 py-1.5 text-left text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent ${
                     active ? 'font-semibold text-ink' : 'text-ink'
                   }`}
                 >
@@ -202,24 +202,24 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
                   aria-label={`Options for ${chat.title}`}
                   aria-haspopup="true"
                   aria-expanded={menuOpen}
-                  className="shrink-0 rounded-md px-2 text-muted hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                  className="shrink-0 rounded-xl px-2 text-muted hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                 >
                   ⋯
                 </button>
               </div>
               {menuOpen && (
-                <div className="ml-2 mt-0.5 flex gap-1 rounded-md border border-rule bg-surface px-2 py-1">
+                <div className="ml-2 mt-0.5 flex gap-1 rounded-xl border-[1.5px] border-ink bg-surface px-2 py-1">
                   <button
                     type="button"
                     onClick={() => startRename(chat)}
-                    className="rounded px-2 py-1 text-sm text-ink hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                    className="rounded-lg px-2 py-1 text-sm text-ink hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                   >
                     Rename
                   </button>
                   <button
                     type="button"
                     onClick={() => setMode({ kind: 'delete', id: chat.id })}
-                    className="rounded px-2 py-1 text-sm text-danger hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                    className="rounded-lg px-2 py-1 text-sm text-danger hover:bg-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                   >
                     Delete
                   </button>
