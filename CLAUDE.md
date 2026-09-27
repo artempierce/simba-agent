@@ -37,9 +37,23 @@ model-based checks are an extra layer, never the only one. Fail closed on safety
 
 ## Workflow
 
+Work is split between a lead (plans, writes contracts, integrates, opens PRs) and builder agents
+(implement one task each, in their own worktree, touching only the files they own). Before any PR,
+the change is reviewed by two critics, and every finding is fixed or explicitly waived:
+
+1. **Code expert (architecture)** — does it fit the design book and `docs/contracts.md`? Right layer,
+   simplest design, no hidden coupling, security rule respected, correctness bugs.
+2. **Quality engineer (efficiency + tests)** — wasted work, blocking calls in async code, slow regexes,
+   needless model calls or DB round-trips; do the tests prove what their docstrings claim, and would
+   they fail if the code broke?
+
+Both critics treat **learning-first readability as the top criterion**: the documentation standard
+above, clear names, small functions, one idea per step. Code that works but a learner can't follow
+is not done.
+
 A step is done only when: it runs and shows in the trace panel; `cd backend && uv run pytest` and
-`cd frontend && npm run lint && npm run build` pass; code is documented to the standard; it went
-through a pull request into `main` with green CI.
+`cd frontend && npm run lint && npm run build` pass; both critics' findings are resolved; code is
+documented to the standard; it went through a pull request into `main` with green CI.
 
 ## Commands
 
