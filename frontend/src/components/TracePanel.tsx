@@ -33,6 +33,7 @@ const STAGE_PILL: Record<string, string> = {
   intent: 'bg-sky',
   reason: 'bg-blush',
   generate: 'bg-mint',
+  output_guard: 'bg-butter', // same colour as guard: both are code checks (#15 checks what Simba wrote)
   refuse: 'bg-coral',
 }
 

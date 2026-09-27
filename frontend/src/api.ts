@@ -17,6 +17,8 @@ export type ChatHandlers = {
   onStart: (chatId: string, title: string) => void
   onTrace: (line: TraceLine) => void
   onToken: (text: string) => void
+  // The output guard (#15) retracted the answer: swap everything streamed so far for `text`.
+  onReplace: (text: string) => void
   onError: (message: string) => void
   onDone: (summary: RunSummary) => void
 }
@@ -44,6 +46,7 @@ function dispatchEvent(block: string, handlers: ChatHandlers): boolean {
   if (name === 'start') handlers.onStart(payload.chat_id, payload.title)
   else if (name === 'trace') handlers.onTrace(payload)
   else if (name === 'token') handlers.onToken(payload.text)
+  else if (name === 'replace') handlers.onReplace(payload.text)
   else if (name === 'error') {
     handlers.onError(payload.message)
     return true

@@ -22,7 +22,7 @@ async def stages(graph, text: str) -> list[str]:
 
 
 async def test_safe_message_runs_the_full_pipeline():
-    """A normal message goes guard -> intent -> reason -> generate: the history ends in the model's
+    """A normal message goes guard -> intent -> reason -> generate -> output_guard: the history ends in the model's
     reply, the trace shows the four steps in order, and each LLM step called the model exactly once
     (3 calls). The reason step's decision stays in the state, which is what generate followed."""
     model = fake_model()
@@ -31,7 +31,7 @@ async def test_safe_message_runs_the_full_pipeline():
     assert [m.content for m in result["messages"]] == ["test", FAKE_REPLY]
     assert len(model.calls) == 3
     assert result["decision"] == {"action": "answer", "plan": ["answer briefly"]}
-    assert await stages(graph, "test") == ["guard", "intent", "reason", "generate"]
+    assert await stages(graph, "test") == ["guard", "intent", "reason", "generate", "output_guard"]
 
 
 async def test_generate_sees_the_plan():
@@ -68,7 +68,7 @@ async def test_flagged_message_still_runs_the_full_pipeline():
     graph = build_graph(model, classifier=AlwaysFlags())
     result = await graph.ainvoke(turn("hi"))
     assert result["messages"][-1].content == FAKE_REPLY
-    assert await stages(graph, "hi") == ["guard", "intent", "reason", "generate"]
+    assert await stages(graph, "hi") == ["guard", "intent", "reason", "generate", "output_guard"]
     [guard_trace] = [c async for c in graph.astream(turn("hi"), stream_mode="custom") if c["stage"] == "guard"]
     assert guard_trace["status"] == "flagged"
 

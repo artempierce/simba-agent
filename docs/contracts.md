@@ -83,7 +83,7 @@ Every node calls `emit_trace(stage, status, detail, start, tokens)` **exactly on
  "ms": 640, "input_tokens": 212, "output_tokens": 31, "cost_usd": 0.000367}
 ```
 
-`stage` ∈ `guard | intent | reason | generate | refuse` (`echo` existed in steps 1–4 only).
+`stage` ∈ `guard | intent | reason | generate | output_guard | refuse` (`echo` existed in steps 1–4 only).
 `status` ∈ `ok | blocked | error | flagged` (`flagged` = passed, but the classifier raised a flag —
 shown as ⚑ in the trace panel, in the guard colour, not the error colour). Detail formats are given
 per node in § 7. Keep details short
@@ -188,6 +188,18 @@ detail `fixed reply · {verdict.rule}`. No model. Never echoes the user's messag
 3. `reply = await model.ainvoke(prompt)` — LangGraph streams its tokens (§ 9).
 4. Returns `{"messages": [reply]}`. Trace `ok`, detail `{output_tokens} tokens out`.
 
+### § 7.7 Output guard (#15): `simba/output_guard.py` + `simba/nodes/output_guard.py`
+
+Checks what Simba **writes**. Code only, no model, $0. Policy (Sol, 2026-09-27): **retract**.
+- `check_output(answer, prompts) -> GuardResult`, checks in order: `secret` (`sk-ant-…` or
+  `ANTHROPIC_API_KEY`), `internal-tags` (`<user_message>`, `<intent>`, any case/spacing),
+  `prompt-leak` (a run of `LEAK_WORDS = 8` consecutive words, lowercased, punctuation ignored, shared
+  with `system.md`, `intent.md` or `reason.md`). Pass reason `"pass · 3 checks"`.
+- `RETRACT_TEXT = "I can't share that. Let's talk about something else."`
+- Node `output_guard(state)`: pass → `{}`, trace `ok`; fail → `{"messages": [AIMessage(RETRACT_TEXT,
+  id=<the answer's id>)]}` (same id ⇒ `add_messages` overwrites the answer in the saved history),
+  trace `blocked`, detail `retracted · {rule}`.
+
 ## § 8 Graph (`simba/graph.py`)
 
 `build_graph(model: BaseChatModel, checkpointer=None, classifier: InjectionClassifier | None = None) -> CompiledStateGraph`
@@ -195,9 +207,10 @@ detail `fixed reply · {verdict.rule}`. No model. Never echoes the user's messag
 
 Final shape (step 5):
 ```
-START → guard ─┬─ pass ─→ intent ─┬─ pass ─→ reason → generate → END
+START → guard ─┬─ pass ─→ intent ─┬─ pass ─→ reason → generate → output_guard → END
                └ blocked → refuse └ blocked → refuse → END
 ```
+(`output_guard` added by #15; refuse's fixed text is not checked.)
 Routing functions `after_guard(state) -> "intent" | "refuse"` and `after_intent(state) -> "reason" | "refuse"`
 read `state["verdict"]["status"]`. Steps 1–4 used a placeholder `echo` node (replied
 `"You said: {text}"`); step 5 replaced it with `generate`, giving the final shape above.
@@ -226,6 +239,7 @@ classifier as above, and stores `app.state.graph`, `app.state.checkpointer` (and
 | `trace` | § 6 event | each node |
 | `token` | `{"text": str}` | answer text as it streams |
 | `error` | `{"message": str}` | an exception; then the stream ends |
+| `replace` | `{"text": str}` | #15: the output guard retracted the answer; sent after the tokens, just before `done`. The page swaps the whole reply for `text` |
 | `done` | `{"input_tokens", "output_tokens", "cost_usd", "ms"}` | last; totals summed from trace events |
 
 Chats (step 6): `chat_id: null` creates the chat row (title per § 10); a known id is touched (moves to
