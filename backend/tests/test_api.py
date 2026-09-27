@@ -122,6 +122,34 @@ async def test_second_message_continues_same_chat(tmp_path):
         assert [m.content for m in state.values["messages"]] == ["one", FAKE_REPLY, "two", FAKE_REPLY]
 
 
+async def test_flag_is_reset_between_turns(tmp_path):
+    """#8: turn 1 is flagged by the classifier, turn 2 (same chat) is not. Protects the per-turn
+    reset in api.py's `turn_input` (`"flag": None`, contracts.md § 4): without it, turn 2's saved
+    state would still carry turn 1's flag, even though nothing about turn 2 was ever flagged."""
+
+    class FlagsFirstCallOnly:
+        """Scores the first call as clearly flaggable, every later call as clearly safe."""
+
+        def __init__(self):
+            self.calls = 0
+
+        def score(self, text: str) -> float:
+            self.calls += 1
+            return 0.99 if self.calls == 1 else 0.0
+
+    async with running_app(
+        model=fake_model(), db_path=str(tmp_path / "t.db"), classifier=FlagsFirstCallOnly()
+    ) as (app, client):
+        first = parse_sse((await client.post("/api/chat", json={"message": "one", "chat_id": None})).text)
+        chat_id = first[0][1]["chat_id"]
+        assert any(data.get("status") == "flagged" for name, data in first if name == "trace")
+
+        await client.post("/api/chat", json={"message": "two", "chat_id": chat_id})
+
+        state = await app.state.graph.aget_state({"configurable": {"thread_id": chat_id}})
+        assert state.values["flag"] is None
+
+
 async def test_new_chat_without_id_gets_different_ids(tmp_path):
     """Two requests with chat_id: null each mint their own uuid4 hex — one request never
     accidentally reuses another's chat."""
@@ -136,7 +164,7 @@ async def test_chat_error_event_on_node_exception(monkeypatch, tmp_path):
     simple: `simba.api.build_graph` is monkeypatched (for this test only) to compile a one-node
     graph whose node always raises, standing in for a future real node's bug."""
 
-    def broken_build_graph(model, checkpointer=None):
+    def broken_build_graph(model, checkpointer=None, classifier=None):
         async def boom(state):
             raise RuntimeError("node boom")
 
@@ -181,7 +209,7 @@ async def test_fallback_never_echoes_user_text_when_no_reply_produced(monkeypatc
     own HumanMessage (`type == "human"`). The fallback must recognise that and send `error`
     instead of echoing the user's own input back disguised as an answer (contracts.md § 9)."""
 
-    def noop_build_graph(model, checkpointer=None):
+    def noop_build_graph(model, checkpointer=None, classifier=None):
         async def noop(state):
             return {}
 
@@ -212,7 +240,7 @@ async def test_only_generate_node_tokens_stream_and_no_fallback_once_sent(monkey
     model, but its streamed text must never reach the browser as `token`; only "generate"'s text
     does, empty chunks are skipped, and once real tokens streamed no fallback token is added."""
 
-    def two_node_build_graph(model, checkpointer=None):
+    def two_node_build_graph(model, checkpointer=None, classifier=None):
         async def other(state):
             # A plain model call from a node that isn't "generate" — stands in for intent/reason,
             # whose structured-output calls must stay invisible to the chat (contracts.md § 9).
@@ -320,7 +348,7 @@ async def test_disconnect_mid_stream_still_saves_the_run(monkeypatch, tmp_path):
     land mid-turn instead of racing the (very fast) fake model to the finish.
     """
 
-    def hanging_build_graph(model, checkpointer=None):
+    def hanging_build_graph(model, checkpointer=None, classifier=None):
         async def hang(state):
             await anyio.sleep(3600)  # cancelled by the disconnect below long before this fires
 

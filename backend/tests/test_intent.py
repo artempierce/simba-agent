@@ -114,6 +114,27 @@ async def test_whitespace_and_casing_variants_are_neutralised():
     assert "&lt; /user_message" in sent
 
 
+async def test_flagged_message_adds_a_note_to_the_system_prompt():
+    """#8: when the guard set `state["flag"]`, the intent node must append a note naming it to the
+    system text actually sent to the model — the intent LLM's only way of learning about the flag."""
+    model = fake_model()
+    node = make_node(model)
+    await run_node(node, {"messages": [HumanMessage("hi")], "flag": "classifier 0.97"})
+    system_text = model.calls[-1][0].content
+    assert "classifier 0.97" in system_text
+    assert "prompt injection" in system_text
+
+
+async def test_unflagged_message_adds_no_note():
+    """Without a flag, the system prompt must be unchanged — the note only ever appears when the
+    guard actually set one, so an ordinary message's prompt stays exactly intent.md's text."""
+    model = fake_model()
+    node = make_node(model)
+    await run_node(node, {"messages": [HumanMessage("hi")], "flag": None})
+    system_text = model.calls[-1][0].content
+    assert "classifier" not in system_text
+
+
 async def test_only_newest_message_sent():
     """Only the current turn's message is checked — earlier turns don't influence this check."""
     model = fake_model()

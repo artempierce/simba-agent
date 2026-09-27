@@ -8,7 +8,7 @@
 /** One line in the trace panel: what one graph node did (backend: common.emit_trace). */
 export type TraceLine = {
   stage: string // guard | intent | reason | generate | refuse (echo in step 1)
-  status: 'ok' | 'blocked' | 'error'
+  status: 'ok' | 'blocked' | 'error' | 'flagged' // flagged (#8): passed, but the classifier raised a flag
   detail: string
   ms: number
   input_tokens: number

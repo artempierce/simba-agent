@@ -28,8 +28,8 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 
-from simba.nodes import generate, intent, reason
-from simba.nodes.guard import guard
+from simba.classifier import InjectionClassifier
+from simba.nodes import generate, guard, intent, reason
 from simba.nodes.refuse import refuse
 from simba.state import ChatState
 
@@ -49,7 +49,11 @@ def after_intent(state: ChatState) -> str:
     return "reason" if state["verdict"]["status"] == "pass" else "refuse"
 
 
-def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None = None) -> CompiledStateGraph:
+def build_graph(
+    model: BaseChatModel,
+    checkpointer: BaseCheckpointSaver | None = None,
+    classifier: InjectionClassifier | None = None,
+) -> CompiledStateGraph:
     """Build and compile Simba's graph.
 
     Args:
@@ -58,11 +62,14 @@ def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None =
         checkpointer: where turn-by-turn state is saved between calls, keyed by thread_id; None
                compiles without one (fine for a single-turn test), api.py always passes an
                AsyncSqliteSaver so a chat remembers earlier turns.
+        classifier: the guard's local prompt-injection classifier (#8, classifier.py); None turns
+               that half of the guard off. Passed straight through to `guard.make_node`.
 
     Returns: a compiled graph, ready for `.astream(...)` / `.ainvoke(...)`.
 
     Steps:
-      1. Register the nodes by name. The LLM nodes are built by their `make_node(model)` factories.
+      1. Register the nodes by name. The LLM nodes are built by their `make_node(model)` factories;
+         the guard node is built by its own `make_node(classifier)` factory (#8).
       2. START always goes to `guard`.
       3. After `guard`, `after_guard` picks `intent` or `refuse` (a conditional edge).
       4. After `intent`, `after_intent` picks `reason` or `refuse`.
@@ -71,7 +78,7 @@ def build_graph(model: BaseChatModel, checkpointer: BaseCheckpointSaver | None =
     """
     graph = StateGraph(ChatState)
     # 1. Nodes.
-    graph.add_node("guard", guard)
+    graph.add_node("guard", guard.make_node(classifier))
     graph.add_node("intent", intent.make_node(model))
     graph.add_node("reason", reason.make_node(model))
     graph.add_node("generate", generate.make_node(model))

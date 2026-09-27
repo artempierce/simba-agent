@@ -44,6 +44,7 @@ from pydantic import BaseModel
 
 from simba.chats import ChatStore, title_from
 from simba.chats_api import router as chats_router
+from simba.classifier import InjectionClassifier, load_classifier
 from simba.common import ms_since, text_of
 from simba.graph import build_graph
 from simba.model import cost_usd, make_model
@@ -72,14 +73,28 @@ def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
-def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -> FastAPI:
+def create_app(
+    model: BaseChatModel | None = None,
+    db_path: str | None = None,
+    classifier: InjectionClassifier | None = None,
+    load_real_classifier: bool = False,
+) -> FastAPI:
     """Build the FastAPI app.
 
     Args:
-        model:   chat model to use; None means "decide from backend/.env" (see model.make_model).
-                 Tests always pass a fake_model() so no run can ever cost money.
-        db_path: where the checkpointer's SQLite file lives; None means DEFAULT_DB_PATH. Tests
-                 pass `str(tmp_path / "t.db")` so a test run never touches the real chat history.
+        model:      chat model to use; None means "decide from backend/.env" (see model.make_model).
+                    Tests always pass a fake_model() so no run can ever cost money.
+        db_path:    where the checkpointer's SQLite file lives; None means DEFAULT_DB_PATH. Tests
+                    pass `str(tmp_path / "t.db")` so a test run never touches the real chat history.
+        classifier: the guard's local prompt-injection classifier (#8, classifier.py) to use when
+                    `load_real_classifier` is False; None means "off" — the guard reports "classifier
+                    off" and never flags anything. Tests pass a tiny fake here, or nothing.
+        load_real_classifier: True tells `lifespan` (below) to call `classifier.load_classifier()`
+                    itself, once the server actually starts, ignoring `classifier`. Kept out of
+                    `create_app`'s own body — not called here — because `load_classifier()` can
+                    build the real ~740 MB ONNX model: doing that at import time would mean every
+                    test that merely imports `create_app` pays for it too, and a corrupt model file
+                    would break the import instead of just server start-up.
 
     Loads backend/.env (python-dotenv) so SIMBA_FAKE_LLM / ANTHROPIC_API_KEY are set before
     `make_model()` reads them. Building the model here is safe at import time: constructing
@@ -105,9 +120,12 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
         async with AsyncSqliteSaver.from_conn_string(str(resolved_db_path)) as checkpointer:
             chats = await ChatStore.open(str(resolved_db_path))
             try:
+                # #8: the real classifier (if asked for) is loaded here, at start-up, not above in
+                # create_app's own body — see the `load_real_classifier` docstring above.
+                resolved_classifier = load_classifier() if load_real_classifier else classifier
                 app.state.checkpointer = checkpointer
                 app.state.chats = chats
-                app.state.graph = build_graph(chat_model, checkpointer)
+                app.state.graph = build_graph(chat_model, checkpointer, resolved_classifier)
                 yield
             finally:
                 await chats.close()
@@ -204,6 +222,7 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
                 "verdict": None,
                 "intent": None,
                 "decision": None,
+                "flag": None,
             }
             tokens_in = tokens_out = 0
             token_sent = False
@@ -255,4 +274,6 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
 
 
 # The app object uvicorn serves: `uv run uvicorn simba.api:app --reload --port 8000`.
-app = create_app()
+# `load_real_classifier=True` defers `load_classifier()` to the lifespan (server start-up), not
+# this import — so `from simba.api import create_app` (every test) never loads the ~740 MB model.
+app = create_app(load_real_classifier=True)
