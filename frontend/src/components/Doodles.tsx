@@ -76,10 +76,16 @@ export function Whiskers({ x = 0, y = 0, size = 24, className }: DoodleProps) {
  * small tile inside `<defs>`, then any shape can fill itself with endless copies of that tile via
  * `fill="url(#id)")` — the browser repeats it for you, as real vector art that stays crisp at any
  * zoom level (unlike a plain CSS background-image, which would blur).
+ *
+ * No `z-index` here on purpose: a *negative* z-index (an earlier version used `-z-10` to push this
+ * behind its siblings) doesn't just go behind the hero card — with no stacking context of its own in
+ * between, it can end up behind the nearest opaque ancestor further up the tree too, disappearing
+ * completely. Plain DOM order already does the job: this component is rendered first, so the hero
+ * card and suggestion cards (rendered after it, with no z-index of their own) paint on top of it.
  */
 export function DoodleBand() {
   return (
-    <svg aria-hidden="true" className="absolute inset-0 -z-10 h-full w-full text-ink/10">
+    <svg aria-hidden="true" className="absolute inset-0 h-full w-full text-ink/10">
       <defs>
         <pattern id="doodle-band" width="72" height="72" patternUnits="userSpaceOnUse">
           <Paw x={2} y={2} size={22} />
