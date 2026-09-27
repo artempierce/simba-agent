@@ -10,10 +10,14 @@ live in a trace panel next to the chat.
 ## How one message flows
 
 ```
-your message → guard (code rules) ─┬─ blocked → refuse (fixed reply)
-                                   └─ pass → intent (LLM: restate + safety verdict) ─┬─ unsafe → refuse
-                                                                                    └─ safe → reason (LLM: action + plan) → generate (LLM: streamed answer)
+your message → guard (code rules + local classifier) ─┬─ blocked → refuse (fixed reply)
+                                                      └─ pass (maybe ⚑ flagged) → intent (LLM: restate + safety verdict) ─┬─ unsafe → refuse
+                                                                                                                         └─ safe → reason (LLM: action + plan) → generate (LLM: streamed answer)
 ```
+
+The guard has two layers: regex rules that **block**, then a small local model
+(`protectai/deberta-v3-base-prompt-injection-v2`, runs on your CPU, $0) that only **flags** (⚑). A flag
+never blocks on its own: it tells the intent check to look carefully, and the LLM makes the call.
 
 ## Build status
 
