@@ -25,8 +25,12 @@ your message → guard (code rules) ─┬─ blocked → refuse (fixed reply)
 | 3 | Intent check | done |
 | 4 | Reason | done |
 | 5 | Generate (first real Claude call after the owner's OK) | done (fake model; real Claude awaits OK) |
-| 6 | Chats sidebar: new, open, rename, delete | planned |
+| 6 | Chats sidebar: new, open, rename, delete | done |
 | 7 | Personality tuning | planned |
+
+**Known gap:** the frontend has no automated tests yet (only lint + type-check + build in CI). The
+riskiest untested logic is App.tsx's stale-response guards (`requestedChatRef`, `chatsSeqRef`); a
+small Vitest suite is a good first addition after the MVP.
 
 ## Run it
 

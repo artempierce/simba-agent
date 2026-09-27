@@ -254,15 +254,17 @@ type Chat = { id: string; title: string; created_at: string; updated_at: string 
 `src/api.ts`: `streamChat(message, chatId | null, handlers: {onStart(chatId, title), onTrace(line),
 onToken(text), onError(message), onDone(summary)}): Promise<void>` (fetch + a ReadableStream SSE
 parser, not EventSource, because it's a POST).
-`src/chatsApi.ts` (step 6): `listChats()`, `createChat(title?)`, `getChat(id)`,
-`renameChat(id, title)`, `deleteChat(id)`.
+`src/chatsApi.ts` (step 6): `listChats()`, `getChat(id)`, `renameChat(id, title)`, `deleteChat(id)`.
+(No `createChat`: a chat row is created by the backend on the chat's first message, § 9.)
 
-Components: `App.tsx` (owns state: messages, runs, busy, chats, activeChatId), `ChatView.tsx`
+Components: `App.tsx` (owns state: messages, runs, busy, chats, chatId), `ChatView.tsx`
 (messages + input; assistant text rendered as Markdown with `react-markdown`), `TracePanel.tsx`
-(ported from art-lab; stage colours for guard/intent/reason/generate/refuse/echo), and from step 6
+(ported from art-lab; stage colours for guard/intent/reason/generate/refuse), and from step 6
 `Sidebar.tsx`: props `{chats, activeId, onSelect(id), onNew(), onRename(id, title), onDelete(id)}` —
 "⋯" menu per row with Rename (inline edit, Enter saves, Esc cancels) and Delete (inline
-"Delete this chat? Yes / Cancel"; never `window.confirm`).
+"Delete this chat? Yes / Cancel"; never `window.confirm`); `MobileDrawer.tsx` shows the Sidebar as an
+overlay below 768px. Escape rule: whoever handles an Escape press calls `preventDefault()`, so an
+outer layer (the drawer) only reacts to Escapes nobody inside handled.
 
 Layout: sidebar left (≥ 768px; a menu button below), chat centre, trace right (≥ 1024px).
 
