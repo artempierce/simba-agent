@@ -39,6 +39,7 @@ Needs [uv](https://docs.astral.sh/uv/) and Node 22+.
 ```bash
 cp backend/.env.example backend/.env          # SIMBA_FAKE_LLM=1 = free fake model
 cd backend && uv sync && uv run pytest -q
+cd backend && uv run python -m simba.classifier   # optional, once: downloads the ~740 MB injection classifier
 cd backend && uv run uvicorn simba.api:app --reload --port 8000
 cd frontend && npm install && npm run dev     # http://localhost:5173
 ```
@@ -52,12 +53,14 @@ simba-agent/
 ├── docs/contracts.md         interfaces between the parts
 ├── .github/workflows/ci.yml  tests on every pull request
 ├── data/simba.db             your chats (git-ignored; created on first run)
+├── data/models/              the local classifier's model files (git-ignored; optional)
 ├── backend/simba/
 │   ├── api.py                FastAPI app: POST /api/chat streams SSE events (start/trace/token/error/done)
 │   ├── chats.py              ChatStore: chat titles + each turn's trace, in SQLite
 │   ├── chats_api.py          /api/chats: list, create, open, rename, delete
 │   ├── graph.py              draws the graph: which nodes run, in what order
-│   ├── guard.py              the code guard's rules: size limit + prompt-injection patterns
+│   ├── guard.py              the code guard's rules: size limit (1,000 chars) + prompt-injection patterns
+│   ├── classifier.py         the local prompt-injection model the guard uses to flag (⚑) messages
 │   ├── nodes/                one file per graph node: guard, intent, reason, generate, refuse
 │   ├── model.py              real Claude or the free fake model; cost per call
 │   ├── state.py              the graph's state
