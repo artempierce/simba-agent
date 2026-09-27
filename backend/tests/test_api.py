@@ -122,6 +122,34 @@ async def test_second_message_continues_same_chat(tmp_path):
         assert [m.content for m in state.values["messages"]] == ["one", FAKE_REPLY, "two", FAKE_REPLY]
 
 
+async def test_flag_is_reset_between_turns(tmp_path):
+    """#8: turn 1 is flagged by the classifier, turn 2 (same chat) is not. Protects the per-turn
+    reset in api.py's `turn_input` (`"flag": None`, contracts.md § 4): without it, turn 2's saved
+    state would still carry turn 1's flag, even though nothing about turn 2 was ever flagged."""
+
+    class FlagsFirstCallOnly:
+        """Scores the first call as clearly flaggable, every later call as clearly safe."""
+
+        def __init__(self):
+            self.calls = 0
+
+        def score(self, text: str) -> float:
+            self.calls += 1
+            return 0.99 if self.calls == 1 else 0.0
+
+    async with running_app(
+        model=fake_model(), db_path=str(tmp_path / "t.db"), classifier=FlagsFirstCallOnly()
+    ) as (app, client):
+        first = parse_sse((await client.post("/api/chat", json={"message": "one", "chat_id": None})).text)
+        chat_id = first[0][1]["chat_id"]
+        assert any(data.get("status") == "flagged" for name, data in first if name == "trace")
+
+        await client.post("/api/chat", json={"message": "two", "chat_id": chat_id})
+
+        state = await app.state.graph.aget_state({"configurable": {"thread_id": chat_id}})
+        assert state.values["flag"] is None
+
+
 async def test_new_chat_without_id_gets_different_ids(tmp_path):
     """Two requests with chat_id: null each mint their own uuid4 hex — one request never
     accidentally reuses another's chat."""

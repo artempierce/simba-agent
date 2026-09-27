@@ -74,7 +74,10 @@ def sse(event: str, data: dict) -> str:
 
 
 def create_app(
-    model: BaseChatModel | None = None, db_path: str | None = None, classifier: InjectionClassifier | None = None
+    model: BaseChatModel | None = None,
+    db_path: str | None = None,
+    classifier: InjectionClassifier | None = None,
+    load_real_classifier: bool = False,
 ) -> FastAPI:
     """Build the FastAPI app.
 
@@ -83,9 +86,15 @@ def create_app(
                     Tests always pass a fake_model() so no run can ever cost money.
         db_path:    where the checkpointer's SQLite file lives; None means DEFAULT_DB_PATH. Tests
                     pass `str(tmp_path / "t.db")` so a test run never touches the real chat history.
-        classifier: the guard's local prompt-injection classifier (#8, classifier.py); None means
-                    "off" — the guard reports "classifier off" and never flags anything. Tests never
-                    pass the real one (or pass a tiny fake), so they stay free and fast.
+        classifier: the guard's local prompt-injection classifier (#8, classifier.py) to use when
+                    `load_real_classifier` is False; None means "off" — the guard reports "classifier
+                    off" and never flags anything. Tests pass a tiny fake here, or nothing.
+        load_real_classifier: True tells `lifespan` (below) to call `classifier.load_classifier()`
+                    itself, once the server actually starts, ignoring `classifier`. Kept out of
+                    `create_app`'s own body — not called here — because `load_classifier()` can
+                    build the real ~740 MB ONNX model: doing that at import time would mean every
+                    test that merely imports `create_app` pays for it too, and a corrupt model file
+                    would break the import instead of just server start-up.
 
     Loads backend/.env (python-dotenv) so SIMBA_FAKE_LLM / ANTHROPIC_API_KEY are set before
     `make_model()` reads them. Building the model here is safe at import time: constructing
@@ -111,9 +120,12 @@ def create_app(
         async with AsyncSqliteSaver.from_conn_string(str(resolved_db_path)) as checkpointer:
             chats = await ChatStore.open(str(resolved_db_path))
             try:
+                # #8: the real classifier (if asked for) is loaded here, at start-up, not above in
+                # create_app's own body — see the `load_real_classifier` docstring above.
+                resolved_classifier = load_classifier() if load_real_classifier else classifier
                 app.state.checkpointer = checkpointer
                 app.state.chats = chats
-                app.state.graph = build_graph(chat_model, checkpointer, classifier)
+                app.state.graph = build_graph(chat_model, checkpointer, resolved_classifier)
                 yield
             finally:
                 await chats.close()
@@ -262,6 +274,6 @@ def create_app(
 
 
 # The app object uvicorn serves: `uv run uvicorn simba.api:app --reload --port 8000`.
-# `load_classifier()` is the real classifier when its files are on disk (data/models/prompt-
-# injection/), else None — the guard then runs exactly as it did before #8 (contracts.md § 9).
-app = create_app(classifier=load_classifier())
+# `load_real_classifier=True` defers `load_classifier()` to the lifespan (server start-up), not
+# this import — so `from simba.api import create_app` (every test) never loads the ~740 MB model.
+app = create_app(load_real_classifier=True)

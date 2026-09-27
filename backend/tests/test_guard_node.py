@@ -10,8 +10,11 @@ classifier.py) that returns a fixed score, or raises, and records every text it 
 — free, fast and deterministic, so CI never needs the real 740 MB model.
 """
 
+import asyncio
+
 from langchain_core.messages import HumanMessage
 
+from simba.classifier import THRESHOLD
 from simba.nodes import guard
 from simba.nodes.refuse import REFUSAL_TEXT, refuse
 from tests.node_harness import run_node
@@ -32,6 +35,23 @@ class FakeClassifier:
         if self._raises is not None:
             raise self._raises
         return self._score
+
+
+class LoopCheckingClassifier:
+    """A stand-in whose `score()` proves it was *not* called directly on the event loop: it raises
+    if `asyncio.get_running_loop()` succeeds, i.e. if there's a loop running in the thread `score()`
+    executes in. `asyncio.to_thread` (guard.py) hands the call to a worker thread with no loop of its
+    own, so this passes today; if `to_thread` were ever removed and the guard called `score()`
+    straight from its own `async def`, the same thread's loop would still be running and this would
+    raise — caught by guard.py's `except Exception`, which turns it into a "classifier failed" flag
+    that test_classifier_runs_off_the_event_loop below asserts against."""
+
+    def score(self, text: str) -> float:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return 0.0  # correct: no event loop in this thread, so to_thread really is being used
+        raise AssertionError("classifier.score() ran on the event loop, not off it")
 
 
 async def test_pass_sets_verdict_and_one_ok_trace_line():
@@ -92,6 +112,27 @@ async def test_high_score_flags_but_the_verdict_still_passes():
     assert len(traces) == 1
     assert traces[0]["status"] == "flagged"
     assert traces[0]["detail"] == f"pass · {len(text)} chars · classifier 0.97 ⚑"
+
+
+async def test_classifier_runs_off_the_event_loop():
+    """Regression guard for `asyncio.to_thread` (contracts.md § 7.2): if scoring ever moved back
+    onto the event loop, LoopCheckingClassifier's score() would raise, guard.py's `except Exception`
+    would catch it, and the trace would say "flagged"/"classifier failed" instead of "ok" — so this
+    test would fail."""
+    update, traces = await run_node(guard.make_node(LoopCheckingClassifier()), {"messages": [HumanMessage("hi")]})
+
+    assert traces[0]["status"] == "ok"
+    assert "flag" not in update
+
+
+async def test_score_exactly_at_threshold_is_flagged():
+    """THRESHOLD is inclusive (contracts.md § 7.2 says "score >= THRESHOLD"): a score exactly equal
+    to it must still flag — using `>` instead of `>=` would silently let a borderline score through
+    as "ok"."""
+    update, traces = await run_node(guard.make_node(FakeClassifier(score=THRESHOLD)), {"messages": [HumanMessage("hi")]})
+
+    assert traces[0]["status"] == "flagged"
+    assert update["flag"] == f"classifier {THRESHOLD:.2f}"
 
 
 async def test_scorer_failure_is_fail_safe_flagged_never_blocked():

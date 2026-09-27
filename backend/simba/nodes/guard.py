@@ -14,6 +14,7 @@ must stay separate: the regex/size check decides pass-or-blocked; the classifier
 """
 
 import asyncio
+import logging
 import time
 
 from langchain_core.messages import BaseMessage
@@ -22,6 +23,10 @@ from simba.classifier import THRESHOLD, InjectionClassifier
 from simba.common import emit_trace, text_of
 from simba.guard import check_input
 from simba.state import ChatState
+
+# So a classifier crash still leaves a full traceback somewhere findable (server logs), even though
+# the policy below deliberately hides it from the user and the trace panel behind "classifier failed".
+logger = logging.getLogger(__name__)
 
 
 def _newest_human_text(messages: list[BaseMessage]) -> str:
@@ -89,6 +94,9 @@ def make_node(classifier: InjectionClassifier | None = None):
             score = await asyncio.to_thread(classifier.score, text)
         except Exception:
             # Fail toward caution: a broken classifier is treated like a flag, never a silent "ok".
+            # logger.exception() records the real traceback for whoever reads the server logs —
+            # the trace panel and the flag itself deliberately stay generic (never leak internals).
+            logger.exception("classifier.score() raised; flagging the message instead of crashing")
             emit_trace("guard", "flagged", f"{result.reason} · classifier failed ⚑", start)
             return {"verdict": verdict, "flag": "classifier failed"}
 

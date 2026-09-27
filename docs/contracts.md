@@ -204,13 +204,18 @@ read `state["verdict"]["status"]`. Steps 1–4 used a placeholder `echo` node (r
 
 ## § 9 API (`simba/api.py`)
 
-`create_app(model: BaseChatModel | None = None, db_path: str | None = None, classifier: InjectionClassifier | None = None) -> FastAPI`.
-The module-level app for uvicorn is `app = create_app(classifier=load_classifier())` (#8): the real
-classifier when its files are on disk, else None. Tests never pass one (or pass a tiny fake).
+`create_app(model: BaseChatModel | None = None, db_path: str | None = None, classifier: InjectionClassifier | None = None, load_real_classifier: bool = False) -> FastAPI`.
+`classifier` is what a caller passes directly (None, or a tiny fake in tests). `load_real_classifier=True`
+tells the **lifespan**, not `create_app` itself, to call `load_classifier()` once the server actually
+starts, overriding `classifier` (#8) — `load_classifier()` can build the real ~740 MB ONNX model, so
+calling it eagerly inside `create_app` would make every test that merely imports `create_app` pay for
+that load (and a corrupt model file would break the import). The module-level app for uvicorn is
+`app = create_app(load_real_classifier=True)`: the real classifier when its files are on disk, else
+None, loaded once at start-up, never at import.
 `model=None` → `make_model()`; `db_path=None` → `<repo>/data/simba.db` (dirs created). Loads
-`backend/.env` with python-dotenv. The lifespan opens `AsyncSqliteSaver` on `db_path` and stores
-`app.state.graph`, `app.state.checkpointer` (and from step 6 `app.state.chats`). Module-level
-`app = create_app()` for uvicorn.
+`backend/.env` with python-dotenv. The lifespan opens `AsyncSqliteSaver` on `db_path`, resolves the
+classifier as above, and stores `app.state.graph`, `app.state.checkpointer` (and from step 6
+`app.state.chats`).
 
 - `GET /api/health` → `{"ok": true}`.
 - `POST /api/chat`, body `{"message": str, "chat_id": str | null}` → `text/event-stream`:
