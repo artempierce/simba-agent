@@ -27,7 +27,9 @@ import { deleteChat, getChat, listChats, renameChat } from './chatsApi'
 import { ChatView } from './components/ChatView'
 import { MobileDrawer } from './components/MobileDrawer'
 import { Sidebar } from './components/Sidebar'
+import { SimbaAvatar } from './components/SimbaAvatar'
 import { TracePanel } from './components/TracePanel'
+import { moodFor } from './mood'
 import type { Chat, Message, Run } from './types'
 
 export default function App() {
@@ -218,17 +220,27 @@ export default function App() {
     />
   )
 
+  // Simba's face follows the most recent run (docs/visual-style.md → "Simba avatar"): the header
+  // avatar and the empty-state avatar (inside ChatView) both show this same mood, so Simba never
+  // looks like two different cats at once.
+  const mood = moodFor(runs.at(-1), busy)
+
   return (
-    <div className="grid h-full grid-rows-[auto_1fr]">
-      <header className="flex items-center gap-3 border-b border-rule bg-surface px-6 py-3">
+    <div className="grid h-full grid-rows-[auto_1fr] bg-bg">
+      {/* The brief's "floating pill" header: the bar itself is transparent paper, and the wordmark
+          + avatar sit inside their own white, ink-bordered pill instead of spanning the full width. */}
+      <header className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <div className="flex items-center gap-2.5 rounded-full border-[1.5px] border-ink bg-surface py-1.5 pr-4 pl-2 shadow-sm">
+          <SimbaAvatar mood={mood} size={32} />
+          <span className="font-serif text-xl font-semibold tracking-tight text-ink">Simba</span>
+        </div>
         <button
           type="button"
           onClick={() => setDrawerOpen(true)}
-          className="rounded-lg border border-rule px-3 py-1.5 text-sm hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-accent md:hidden"
+          className="rounded-full border-[1.5px] border-ink bg-surface px-4 py-1.5 text-sm font-medium text-ink shadow-sm hover:bg-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink md:hidden"
         >
           Chats
         </button>
-        <span className="text-lg font-semibold text-accent">Simba</span>
       </header>
       <div className="grid min-h-0 grid-cols-1 md:grid-cols-[16rem_minmax(0,1fr)] lg:grid-cols-[16rem_minmax(0,1fr)_320px]">
         <div className="hidden md:block">{sidebar}</div>
@@ -239,20 +251,20 @@ export default function App() {
             ChatView always gets the remaining space via flex-1 regardless of the banner. */}
         <div className="flex min-h-0 flex-col">
           {chatsError && (
-            <div className="flex items-center justify-between gap-3 border-b border-rule bg-surface px-4 py-2 text-sm text-danger">
+            <div className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-xl border-[1.5px] border-danger bg-surface px-4 py-2 text-sm text-danger sm:mx-6">
               <span>{chatsError}</span>
               <button
                 type="button"
                 onClick={() => setChatsError(null)}
                 aria-label="Dismiss error"
-                className="shrink-0 rounded px-1 hover:opacity-70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                className="shrink-0 rounded-full px-1.5 hover:opacity-70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ink"
               >
                 ✕
               </button>
             </div>
           )}
           <div className="min-h-0 flex-1">
-            <ChatView messages={messages} busy={busy} onSend={send} />
+            <ChatView messages={messages} busy={busy} mood={mood} onSend={send} />
           </div>
         </div>
         <TracePanel runs={runs} busy={busy} />
