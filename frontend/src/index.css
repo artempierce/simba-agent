@@ -4,7 +4,8 @@
 /*
  * Simba's look (docs/visual-style.md, tickets #20/#21): a warm paper page, a bookish serif for
  * headings, black pill buttons, white cards with a thin ink border, and pastel accent cards. The
- * trace panel stays its own dark "terminal" column, like art-lab's.
+ * trace panel (2026-09-27 update) uses this same paper-and-cards style — it used to be its own dark
+ * terminal column (art-lab's look), but Sol asked for it to "match design for right trace part".
  *
  * Colour names say what a colour is FOR (bg, surface, ink, accent…), not what it looks like, so
  * components write `bg-surface` and never a hex. Each `--color-x` becomes Tailwind utilities
@@ -28,25 +29,13 @@
   --color-accent-ink: #ffffff; /* text on a black pill */
   --color-danger: #b3261e; /* errors, delete */
 
-  /* Pastel accent cards: suggestion cards on the empty state, your own chat bubble. */
+  /* Pastel accent cards: suggestion cards on the empty state, your own chat bubble, and (below) the
+     small stage pills in the trace panel. */
   --color-sky: #bcd4f1;
   --color-butter: #f1de99;
   --color-blush: #efd0df;
   --color-coral: #edb6a3;
-
-  /* The trace panel: a terminal-dark column, deliberately unlike the paper page around it. */
-  --color-term: #161616;
-  --color-term-ink: #e9e7e1;
-  --color-term-dim: #8c8a84;
-  --color-term-rule: #2b2a28;
-
-  /* Trace stage colours — light pastels, chosen to stay readable on the terminal background. */
-  --color-t-guard: #e6ae52; /* guard: code rules */
-  --color-t-intent: #8ec5ff; /* intent: LLM safety check */
-  --color-t-reason: #c3a6ff; /* reason: action + plan */
-  --color-t-generate: #7fdcb4; /* generate: the answer */
-  --color-t-refuse: #ff8a80; /* refuse, blocked lines, errors */
-  --color-t-echo: #d7dbe2; /* echo: step 1 only */
+  --color-mint: #cde8d4; /* the trace panel's "generate" stage pill only */
 }
 
 html,
