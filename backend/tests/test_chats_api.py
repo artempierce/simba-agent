@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
 
@@ -101,6 +101,24 @@ async def test_get_chat_with_no_turns_yet(tmp_path):
             body = detail.json()
             assert body["messages"] == []
             assert body["runs"] == []
+
+
+async def test_get_chat_filters_out_non_human_ai_messages(tmp_path):
+    """The frontend's Message type only has "user"/"assistant" roles: a SystemMessage sitting in the
+    checkpointed state (graph-internal bookkeeping, not a turn of the conversation) must not leak into
+    `messages`, even though it shares the same thread as the real human/ai turns."""
+    async with _test_app(tmp_path) as (app, chats, graph):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            chat_id = (await client.post("/api/chats", json={"title": "trip"})).json()["id"]
+            await _seed_thread(graph, chat_id)
+            config = {"configurable": {"thread_id": chat_id}}
+            await graph.aupdate_state(config, {"messages": [SystemMessage("internal note")]})
+
+            detail = await client.get(f"/api/chats/{chat_id}")
+            assert detail.json()["messages"] == [
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "pong"},
+            ]
 
 
 async def test_create_chat_title_validation(tmp_path):

@@ -77,8 +77,8 @@ class ChatStore:
         return cls(db)
 
     async def create(self, title: str, chat_id: str | None = None) -> dict:
-        """Insert a new chat and return it as a dict. `chat_id` defaults to a fresh uuid4 hex (api.py
-        picks the id so it can use the same id for the graph's checkpointer thread)."""
+        """Insert a new chat and return it as a dict. `chat_id` defaults to a fresh uuid4 hex — callers
+        (api.py included) normally omit it and read the id back off the returned dict."""
         chat_id = chat_id or uuid.uuid4().hex
         now = _now()
         await self._db.execute(
