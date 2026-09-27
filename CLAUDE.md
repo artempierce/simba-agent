@@ -37,6 +37,11 @@ model-based checks are an extra layer, never the only one. Fail closed on safety
 
 ## Workflow
 
+**Tickets first.** Every change starts from a GitHub issue (labels: `mvp`, `post-mvp`, `needs-owner`,
+`design`, `chore`). Name the branch `<issue-number>-<short-slug>` (e.g. `8-guard-classifier`), start
+the PR title with the ticket (`#8 Guard: local injection classifier`) and put `Closes #8` in the PR
+body, so merging closes the ticket and `git log` / the branch list show which ticket each change is for.
+
 Work is split between a lead (plans, writes contracts, integrates, opens PRs) and builder agents
 (implement one task each, in their own worktree, touching only the files they own). To save tokens,
 related tickets are batched into one larger PR (e.g. `Closes #20, closes #21`), and that PR is
