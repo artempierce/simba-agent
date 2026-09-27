@@ -74,8 +74,10 @@ export function Whiskers({ x = 0, y = 0, size = 24, className }: DoodleProps) {
  *
  * This is what the file header means by "tiled as a pattern": an SVG `<pattern>` is drawn ONCE, as a
  * small tile inside `<defs>`, then any shape can fill itself with endless copies of that tile via
- * `fill="url(#id)")` — the browser repeats it for you, as real vector art that stays crisp at any
- * zoom level (unlike a plain CSS background-image, which would blur).
+ * `fill="url(#id)"` — the browser repeats it for you, as vector art that stays crisp at any zoom
+ * level. `patternUnits="userSpaceOnUse"` means the tile's 72×72 size is in real pixels of this SVG,
+ * so the doodles keep the same size however big the band is (the default would stretch the tile
+ * relative to the shape it fills).
  *
  * No `z-index` here on purpose: a *negative* z-index (an earlier version used `-z-10` to push this
  * behind its siblings) doesn't just go behind the hero card — with no stacking context of its own in
