@@ -30,7 +30,6 @@ number of `token` -> `done` (once, last) — or `error` instead of `done` if the
 
 import json
 import time
-import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -148,13 +147,17 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
              this chat later shows its trace panel again. Saved on every ending: done or error.
           7. If the stream is cut off before step 6 (the browser disconnected), save the run anyway,
              marked as interrupted — so a reopened chat never shows a message without its trace.
+             (Rare edge case: if the cancellation instead lands while the ASGI server's own `send()`
+             call is blocked on backpressure — outside this generator entirely — the save can't run
+             until Python later closes the abandoned generator, e.g. via garbage collection, so it's
+             no longer deterministic in that one case.)
         """
         graph = app.state.graph
         chats: ChatStore = app.state.chats
         # 1. Find or create the sidebar row. An id we don't know is refused, never created: the
         #    client's text must not become a database key (untrusted input — CLAUDE.md).
         if req.chat_id is None:
-            chat = await chats.create(title_from(req.message), chat_id=uuid.uuid4().hex)
+            chat = await chats.create(title_from(req.message))
         elif (chat := await chats.get(req.chat_id)) is not None:
             await chats.touch(chat["id"])
         else:
@@ -178,10 +181,14 @@ def create_app(model: BaseChatModel | None = None, db_path: str | None = None) -
                 async for event in stream_turn(lines, save_run):
                     yield event
             finally:
-                # 7. The browser went away mid-answer (tab closed, "New chat" clicked): the server
-                #    cancels this generator, which skips the saves above. Save what we have, marked
-                #    as interrupted. `CancelScope(shield=True)` lets this one await finish even though
-                #    the surrounding task is being cancelled.
+                # 7. The browser went away mid-answer (tab closed, "New chat" clicked): Starlette
+                #    delivers this as cancellation of this generator, which skips the saves above.
+                #    Save what we have, marked as interrupted. `CancelScope(shield=True)` lets this
+                #    one await finish even though the surrounding task is being cancelled. (If the
+                #    cancellation instead catches this task while it's blocked inside `send()` itself
+                #    — backpressure from a slow client — it never reaches this generator's code at
+                #    all, so the shield can't help; the save then only happens once the abandoned
+                #    generator is closed by garbage collection, which is rare and not deterministic.)
                 if not saved:
                     with anyio.CancelScope(shield=True):
                         await chats.add_run(chat_id, req.message, lines, None, "interrupted before the reply finished")

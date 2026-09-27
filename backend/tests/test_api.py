@@ -11,12 +11,14 @@ so `app.state.graph` / `.checkpointer` exist exactly as they would under uvicorn
 import json
 from contextlib import asynccontextmanager
 
+import anyio
 import pytest
 from httpx import ASGITransport, AsyncClient
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, START, StateGraph
 
-from simba.api import ChatRequest, create_app
+from simba.api import create_app
+from simba.chats import ChatStore
 from simba.model import FAKE_REPLY, fake_model
 from simba.nodes.refuse import REFUSAL_TEXT
 from simba.state import ChatState
@@ -305,20 +307,83 @@ async def test_unknown_chat_id_is_refused_not_created(tmp_path):
         assert (await client.get("/api/chats")).json() == []
 
 
-async def test_disconnect_mid_stream_still_saves_the_run(tmp_path):
-    """If the browser goes away mid-answer, the server closes the stream early. The turn's run must
-    still be saved (marked interrupted) so a reopened chat never shows a message without its trace.
-    Simulated by reading only the `start` event from the response body and then closing it — what
-    the server does when the client disconnects."""
-    async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (app, _client):
-        chat_route = next(r for r in app.routes if getattr(r, "path", "") == "/api/chat")
-        response = await chat_route.endpoint(ChatRequest(message="tell me a story", chat_id=None))
-        body = response.body_iterator
-        first = await body.__anext__()
-        assert first.startswith("event: start")
-        await body.aclose()
+async def test_disconnect_mid_stream_still_saves_the_run(monkeypatch, tmp_path):
+    """A *real* client disconnect isn't the test closing a Python iterator (that's just GeneratorExit
+    from the test itself) — under uvicorn, the ASGI server sends an `http.disconnect` message (ASGI
+    spec >= 2.3), and it's Starlette that reacts to it by cancelling the streaming response's task.
+    This test drives the FastAPI app as a raw ASGI callable, with a `receive` that sends the request
+    body and then, once the response has started, an `http.disconnect` — the actual path api.py's
+    `anyio.CancelScope(shield=True)` guards. The turn's run must still be saved, marked interrupted,
+    so a reopened chat never shows a message without its trace.
 
-        [chat] = await app.state.chats.list()
-        [run] = await app.state.chats.runs(chat["id"])
-        assert run["prompt"] == "tell me a story"
-        assert run["summary"] is None and run["error"] == "interrupted before the reply finished"
+    The graph is swapped for a node that never returns on its own, so the disconnect is guaranteed to
+    land mid-turn instead of racing the (very fast) fake model to the finish.
+    """
+
+    def hanging_build_graph(model, checkpointer=None):
+        async def hang(state):
+            await anyio.sleep(3600)  # cancelled by the disconnect below long before this fires
+
+        graph = StateGraph(ChatState)
+        graph.add_node("hang", hang)
+        graph.add_edge(START, "hang")
+        graph.add_edge("hang", END)
+        return graph.compile(checkpointer=checkpointer)
+
+    monkeypatch.setattr("simba.api.build_graph", hanging_build_graph)
+
+    db_path = str(tmp_path / "t.db")
+    async with running_app(model=fake_model(), db_path=db_path) as (app, _client):
+        # A minimal but spec-accurate ASGI scope for one POST /api/chat request.
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "POST",
+            "path": "/api/chat",
+            "raw_path": b"/api/chat",
+            "query_string": b"",
+            "headers": [(b"content-type", b"application/json")],
+            "client": ("t", 1),
+            "server": ("t", 80),
+            "scheme": "http",
+        }
+        body = json.dumps({"message": "tell me a story", "chat_id": None}).encode()
+        response_started = anyio.Event()
+        sent: list[dict] = []
+        calls = 0
+
+        async def receive():
+            """Call 1: the request body. Every call after: block until a response chunk has actually
+            gone out over `send`, then report the client gone — so the disconnect can only land once
+            streaming has begun, matching a real "browser closed the tab mid-answer"."""
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {"type": "http.request", "body": body, "more_body": False}
+            await response_started.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            """Records every ASGI message the app sends, and flags once the first SSE bytes are out."""
+            sent.append(message)
+            if message["type"] == "http.response.body" and message["body"]:
+                response_started.set()
+
+        await app(scope, receive, send)
+
+        first_chunk = next(m["body"] for m in sent if m["type"] == "http.response.body" and m["body"])
+        assert first_chunk.startswith(b"event: start")  # the response really did begin streaming
+
+        # Read back through a brand-new connection to the same file, not `app.state.chats`'s own
+        # connection: SQLite lets a connection see its own uncommitted writes, so re-using it could
+        # pass even if the interrupted save never actually reached `commit()` — only a second
+        # connection proves the row was *durably* saved, which is the whole point of step 7.
+        verify_store = await ChatStore.open(db_path)
+        try:
+            [chat] = await verify_store.list()
+            [run] = await verify_store.runs(chat["id"])
+            assert run["prompt"] == "tell me a story"
+            assert run["summary"] is None and run["error"] == "interrupted before the reply finished"
+        finally:
+            await verify_store.close()

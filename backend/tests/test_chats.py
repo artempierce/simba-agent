@@ -8,6 +8,7 @@ state and each one starts from an empty database.
 
 import asyncio
 
+from simba import chats as chats_module
 from simba.chats import ChatStore, title_from
 
 
@@ -35,11 +36,14 @@ def test_title_from_empty_message_is_new_chat():
 
 
 async def test_create_returns_chat_with_matching_timestamps(tmp_path):
-    """A freshly created chat has created_at == updated_at and carries the given title."""
+    """A freshly created chat has created_at == updated_at and carries the given title — checked
+    against a fresh read from the database, not just the dict `create()` handed back, so this also
+    proves the row was actually written, not merely echoed back in memory."""
     store = await ChatStore.open(str(tmp_path / "t.db"))
     chat = await store.create("hello")
-    assert chat["title"] == "hello"
-    assert chat["created_at"] == chat["updated_at"]
+    stored = await store.get(chat["id"])
+    assert stored["title"] == "hello"
+    assert stored["created_at"] == stored["updated_at"]
     await store.close()
 
 
@@ -54,6 +58,20 @@ async def test_list_orders_newest_updated_first(tmp_path):
     await store.touch(first["id"])  # bump `first` back to the top
     chats = await store.list()
     assert [c["id"] for c in chats] == [first["id"], second["id"]]
+    await store.close()
+
+
+async def test_list_breaks_updated_at_ties_by_rowid(tmp_path, monkeypatch):
+    """Two chats created in the same instant (a real possibility — `_now()`'s microsecond resolution
+    isn't guaranteed unique) must still sort deterministically: `list()`'s `ORDER BY ..., rowid DESC`
+    puts the more recently inserted one first, not whatever order SQLite happens to walk ties in."""
+    monkeypatch.setattr(chats_module, "_now", lambda: "2026-01-01T00:00:00+00:00")
+    store = await ChatStore.open(str(tmp_path / "t.db"))
+    first = await store.create("first")
+    second = await store.create("second")
+    assert first["updated_at"] == second["updated_at"]  # the tie this test is about
+    chats = await store.list()
+    assert [c["id"] for c in chats] == [second["id"], first["id"]]
     await store.close()
 
 

@@ -115,6 +115,8 @@ async def get_chat(chat_id: str, request: Request) -> dict:
 @router.patch("/{chat_id}")
 async def rename_chat(chat_id: str, body: RenameChatBody, request: Request) -> dict:
     """PATCH /api/chats/{id} -> rename it. `body.title` is already trimmed/validated by RenameChatBody."""
+    # Checked here, not left to `rename()`'s own None return, so an unknown id gets the shared 404
+    # (with its {"detail": ...} body) instead of `rename`'s None reaching the response as `null`.
     await _get_or_404(request, chat_id)
     return await request.app.state.chats.rename(chat_id, body.title)
 
@@ -124,9 +126,11 @@ async def delete_chat(chat_id: str, request: Request) -> None:
     """DELETE /api/chats/{id} -> remove the chat and its runs, and erase its checkpointed graph state
     (adelete_thread) so nothing of a deleted chat is left in either store.
 
-    Checkpointer first, then the ChatStore row: if adelete_thread fails, the chat still shows up as a
-    404-free row to retry against, instead of a checkpoint orphaned behind an already-gone chat.
+    Checkpointer first, then the ChatStore row: if adelete_thread fails, the chat stays listed, so
+    delete can be retried, instead of a checkpoint orphaned behind an already-gone chat.
     """
+    # Checked here so an unknown id gets one clear 404 up front, rather than adelete_thread silently
+    # doing nothing on a thread that was never there and chats.delete() then reporting False.
     await _get_or_404(request, chat_id)
     await request.app.state.checkpointer.adelete_thread(chat_id)
     await request.app.state.chats.delete(chat_id)
