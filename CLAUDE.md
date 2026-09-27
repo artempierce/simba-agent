@@ -1,12 +1,53 @@
 # Simba — rules for AI coding sessions
 
-Simba is a **learning project**: a small, friendly assistant (FastAPI + LangGraph backend, React
-frontend) grown one step at a time so every agent pattern stays understandable. The owner learns by
-reading the code.
+## What Simba is
 
-- What to build and why: `docs/design.html` (the design book, published at
-  https://claude.ai/artifact/Kh7t1hNsLvJdULwHgEtsSD). Update and republish it when a step changes the design.
+A personal assistant that can grow itself: on the owner's request it proposes a new capability
+(skill, tool, MCP connection, behaviour) and, after the owner approves, builds and installs it.
+It is also a **learning project**, grown one small step at a time so every agent pattern stays
+readable (FastAPI + LangGraph backend, React frontend). The owner learns by reading the code.
+
+- **Start here:** `STATE.md` — current focus, next tickets, where to look. Read it first.
+- Why and what: `docs/design.html` (published at https://claude.ai/artifact/Kh7t1hNsLvJdULwHgEtsSD).
+  Read it only when the task changes the design; then update and republish it.
 - Exact interfaces: `docs/contracts.md`. Code and contracts must agree; fix one of them in the same change.
+- Work items: GitHub issues (`gh issue view <n>`). Issues are the source of truth; `STATE.md` points to them.
+
+## Session rules (keep sessions cheap)
+
+1. Read `STATE.md`, then the ticket, then only the files the ticket touches. Don't survey the repo.
+2. Code directly. Short replies, no filler.
+3. One ticket, one small PR. If the logic diff grows past ~150 lines (docs and tests don't count),
+   stop and propose a split.
+4. Verify with the commands below and read only the failing output.
+5. No subagents unless the owner asks. Reviews happen in this session (see Workflow).
+6. When a ticket's PR is ready, update `STATE.md` in that same PR (focus, next up, recently done).
+
+## Commands
+
+```bash
+cd backend && uv run pytest -q --tb=short
+cd backend && SIMBA_FAKE_LLM=1 uv run uvicorn simba.api:app --reload --port 8000
+cd frontend && npm run lint && npm run build     # build includes the TypeScript check
+cd frontend && npm run dev                        # http://localhost:5173
+```
+
+## Self-improvement rules (Simba changing itself)
+
+Hard limits for the self-growth feature (#30). They live in deterministic code, never only in prompts.
+
+1. **Propose, never apply.** Simba may draft a skill, tool, MCP connection or behaviour; nothing is
+   installed until the owner approves it in the UI. The approval gate is code, not a model decision.
+2. **Show the whole change.** The approval view lists exactly what gets added: files, permissions,
+   network hosts, expected cost.
+3. **Least privilege.** Every capability declares what it may touch (files, hosts, secrets);
+   anything undeclared is denied. New MCP connections start disabled.
+4. **Generated means untrusted.** Code and prompts Simba writes are treated like user input:
+   validated, tested with the fake model, run sandboxed.
+5. **Reversible and visible.** Every capability is versioned, can be disabled or rolled back in one
+   step, and its install shows in the trace.
+6. **Simba cannot loosen its own limits.** The guard, the approval gate, budgets, secrets and these
+   rules change only through a human-reviewed PR.
 
 ## Documentation standard (required for every change)
 
@@ -37,49 +78,25 @@ model-based checks are an extra layer, never the only one. Fail closed on safety
 
 ## Workflow
 
-**Tickets first.** Every change starts from a GitHub issue (labels: `mvp`, `post-mvp`, `needs-owner`,
-`design`, `chore`). Name the branch `<issue-number>-<short-slug>` (e.g. `8-guard-classifier`), start
-the PR title with the ticket (`#8 Guard: local injection classifier`) and put `Closes #8` in the PR
-body, so merging closes the ticket and `git log` / the branch list show which ticket each change is for.
+- **Ticket first.** Every change starts from a GitHub issue (labels: `mvp`, `post-mvp`, `needs-owner`,
+  `design`, `chore`). Branch `<n>-<slug>` (e.g. `8-guard-classifier`), PR title `#8 …`, PR body
+  `Closes #8`. Related tickets may share one PR (`Closes #20, closes #21`).
+- **One ticket, one fresh worktree:**
+  1. `git fetch && git worktree add .claude/worktrees/<n>-<slug> -b <n>-<slug> origin/main`, then
+     enter it with the `EnterWorktree` tool (`path`) — file tools can't edit it otherwise.
+  2. Work and test there.
+  3. Push and open the PR **into `main`**, never into another feature branch (stacked PRs had to be
+     re-landed, PR #27). Merge when CI is green.
+  4. Tear down right away: `git worktree remove …`, delete the local and the remote branch.
+     A worktree that still exists means unfinished work.
+- **Review once, in this session, two passes;** fix or explicitly waive every finding:
+  1. *Architecture:* fits the design book and contracts, right layer, simplest design, no hidden
+     coupling, security and self-improvement rules respected, no correctness bugs.
+  2. *Quality:* no wasted work, blocking calls in async code, slow regexes or needless model / DB
+     calls; tests prove what their docstrings claim and would fail if the code broke.
 
-**One ticket, one clean worktree (keeps the workspace clean and deterministic):**
-
-1. Spin up a fresh worktree from the latest `main`:
-   `git fetch && git worktree add .claude/worktrees/<n>-<slug> -b <n>-<slug> origin/main`
-2. Do the work there; run the tests (`uv run pytest -q`, `npm run lint && npm run build`).
-3. Push and open the PR **into `main`**, never into another feature branch — stacked PRs merged
-   into their base branch instead of `main` and had to be re-landed (PR #27).
-4. When CI is green, merge.
-5. Immediately tear down: `git worktree remove .claude/worktrees/<n>-<slug>`, delete the local
-   branch, and delete the remote branch (`git push origin --delete <n>-<slug>`).
-
-Nothing lives in a worktree after its PR merges; a worktree that still exists means unfinished work.
-
-Work is split between a lead (plans, writes contracts, integrates, opens PRs) and builder agents
-(implement one task each, in their own worktree, touching only the files they own). To save tokens,
-related tickets are batched into one larger PR (e.g. `Closes #20, closes #21`), and that PR is
-reviewed once with two passes, done by the lead in the same session one after the other (no fresh
-reviewer agents — each new agent costs ~50k tokens to start); every finding is fixed or explicitly waived:
-
-1. **Code expert (architecture)** — does it fit the design book and `docs/contracts.md`? Right layer,
-   simplest design, no hidden coupling, security rule respected, correctness bugs.
-2. **Quality engineer (efficiency + tests)** — wasted work, blocking calls in async code, slow regexes,
-   needless model calls or DB round-trips; do the tests prove what their docstrings claim, and would
-   they fail if the code broke?
-
-Both critics treat **learning-first readability as the top criterion**: the documentation standard
-above, clear names, small functions, one idea per step. Code that works but a learner can't follow
-is not done.
-
-A step is done only when: it runs and shows in the trace panel; `cd backend && uv run pytest` and
-`cd frontend && npm run lint && npm run build` pass; both critics' findings are resolved; code is
-documented to the standard; it went through a pull request into `main` with green CI.
-
-## Commands
-
-```bash
-cd backend && uv run pytest -q
-cd backend && SIMBA_FAKE_LLM=1 uv run uvicorn simba.api:app --reload --port 8000
-cd frontend && npm run dev          # http://localhost:5173
-cd frontend && npm run lint && npm run build
-```
+  Learning-first readability is the top criterion for both: code that works but a learner can't
+  follow is not done.
+- **Done means:** it runs and shows in the trace panel; tests, lint and build pass; review findings
+  are resolved; code is documented to the standard; `STATE.md` is updated; a PR merged into `main`
+  with green CI.
