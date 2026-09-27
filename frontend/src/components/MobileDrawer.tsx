@@ -56,7 +56,13 @@ export function MobileDrawer({ open, onClose, children }: Props) {
   return (
     <div className="fixed inset-0 z-50 md:hidden" onKeyDown={onKeyDown}>
       <div className="absolute inset-0 bg-ink/40" onClick={onClose} aria-hidden="true" />
-      <div ref={panelRef} role="dialog" aria-modal="true" aria-label="Chats" className="relative h-full w-64">
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Chats"
+        className="relative h-full w-64 shadow-xl"
+      >
         {children}
       </div>
     </div>
