@@ -53,6 +53,7 @@ cd frontend && npm install && npm run dev     # http://localhost:5173
 ```
 simba-agent/
 ├── CLAUDE.md                 rules for AI coding sessions
+├── STATE.md                  current focus + where to look (read first by AI sessions)
 ├── docs/design.html          design book
 ├── docs/contracts.md         interfaces between the parts
 ├── .github/workflows/ci.yml  tests on every pull request
