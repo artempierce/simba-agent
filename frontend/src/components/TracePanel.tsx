@@ -25,8 +25,19 @@ const STAGE_COLOR: Record<string, string> = {
   echo: 'text-t-echo', // step 1 only, until the real nodes land
 }
 
-/** Trace status → icon shown before the line. */
-const STATUS_ICON: Record<TraceLine['status'], string> = { ok: '✓', blocked: '⛔', error: '✕' }
+/** Trace status → icon shown before the line. `flagged` (#8) means "passed, but the local classifier
+ * raised a flag for the intent check to weigh" — a warning, not a failure. */
+const STATUS_ICON: Record<TraceLine['status'], string> = { ok: '✓', blocked: '⛔', error: '✕', flagged: '⚑' }
+
+/**
+ * The colour of one trace line. Blocked and error lines always use the refusal colour, whatever the
+ * stage, so a problem stands out at a glance. A flagged line keeps its stage's own colour: the message
+ * still went through, and the ⚑ icon already marks it.
+ */
+function lineColor(line: TraceLine): string {
+  if (line.status === 'blocked' || line.status === 'error') return 'text-t-refuse'
+  return STAGE_COLOR[line.stage] ?? 'text-term-ink'
+}
 
 /** Short token count for the footer: 812 → "812", 1234 → "1.2k". */
 function formatTokens(n: number): string {
@@ -83,9 +94,7 @@ function RunBlock({ run, running }: { run: Run; running: boolean }) {
       <div className="mb-2 truncate text-term-dim">› {run.prompt}</div>
       <ul className="space-y-1.5">
         {run.lines.map((line, i) => {
-          // Anything other than "ok" (blocked, error) always shows in the refusal colour, whatever
-          // the stage, so a problem stands out at a glance.
-          const color = line.status !== 'ok' ? 'text-t-refuse' : (STAGE_COLOR[line.stage] ?? 'text-term-ink')
+          const color = lineColor(line)
           return (
             <li key={i} className="grid grid-cols-[1.4em_minmax(0,1fr)_auto] gap-x-2">
               <span className={color}>{STATUS_ICON[line.status] ?? '•'}</span>
