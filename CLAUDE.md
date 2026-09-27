@@ -42,6 +42,19 @@ model-based checks are an extra layer, never the only one. Fail closed on safety
 the PR title with the ticket (`#8 Guard: local injection classifier`) and put `Closes #8` in the PR
 body, so merging closes the ticket and `git log` / the branch list show which ticket each change is for.
 
+**One ticket, one clean worktree (keeps the workspace clean and deterministic):**
+
+1. Spin up a fresh worktree from the latest `main`:
+   `git fetch && git worktree add .claude/worktrees/<n>-<slug> -b <n>-<slug> origin/main`
+2. Do the work there; run the tests (`uv run pytest -q`, `npm run lint && npm run build`).
+3. Push and open the PR **into `main`**, never into another feature branch — stacked PRs merged
+   into their base branch instead of `main` and had to be re-landed (PR #27).
+4. When CI is green, merge.
+5. Immediately tear down: `git worktree remove .claude/worktrees/<n>-<slug>`, delete the local
+   branch, and delete the remote branch (`git push origin --delete <n>-<slug>`).
+
+Nothing lives in a worktree after its PR merges; a worktree that still exists means unfinished work.
+
 Work is split between a lead (plans, writes contracts, integrates, opens PRs) and builder agents
 (implement one task each, in their own worktree, touching only the files they own). To save tokens,
 related tickets are batched into one larger PR (e.g. `Closes #20, closes #21`), and that PR is
