@@ -13,7 +13,7 @@ from simba.nodes.refuse import REFUSAL_TEXT
 
 def turn(text: str) -> dict:
     """One turn's graph input (contracts.md § 4): the new message plus reset per-turn fields."""
-    return {"messages": [HumanMessage(text)], "verdict": None, "intent": None, "decision": None}
+    return {"messages": [HumanMessage(text)], "verdict": None, "intent": None, "decision": None, "flag": None}
 
 
 async def stages(graph, text: str) -> list[str]:
@@ -53,6 +53,24 @@ async def test_guard_block_skips_the_model():
     assert result["messages"][-1].content == REFUSAL_TEXT
     assert model.calls == []
     assert await stages(graph, attack) == ["guard", "refuse"]
+
+
+async def test_flagged_message_still_runs_the_full_pipeline():
+    """A message the classifier flags (#8) is not blocked — the guard's policy is flag, never
+    block (contracts.md § 7.2) — so it must still reach intent -> reason -> generate exactly like
+    an unflagged message, with only the guard's trace status marking it "flagged"."""
+
+    class AlwaysFlags:
+        def score(self, text: str) -> float:
+            return 0.97
+
+    model = fake_model()
+    graph = build_graph(model, classifier=AlwaysFlags())
+    result = await graph.ainvoke(turn("hi"))
+    assert result["messages"][-1].content == FAKE_REPLY
+    assert await stages(graph, "hi") == ["guard", "intent", "reason", "generate"]
+    [guard_trace] = [c async for c in graph.astream(turn("hi"), stream_mode="custom") if c["stage"] == "guard"]
+    assert guard_trace["status"] == "flagged"
 
 
 async def test_intent_block_goes_to_refuse():

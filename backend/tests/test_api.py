@@ -136,7 +136,7 @@ async def test_chat_error_event_on_node_exception(monkeypatch, tmp_path):
     simple: `simba.api.build_graph` is monkeypatched (for this test only) to compile a one-node
     graph whose node always raises, standing in for a future real node's bug."""
 
-    def broken_build_graph(model, checkpointer=None):
+    def broken_build_graph(model, checkpointer=None, classifier=None):
         async def boom(state):
             raise RuntimeError("node boom")
 
@@ -181,7 +181,7 @@ async def test_fallback_never_echoes_user_text_when_no_reply_produced(monkeypatc
     own HumanMessage (`type == "human"`). The fallback must recognise that and send `error`
     instead of echoing the user's own input back disguised as an answer (contracts.md § 9)."""
 
-    def noop_build_graph(model, checkpointer=None):
+    def noop_build_graph(model, checkpointer=None, classifier=None):
         async def noop(state):
             return {}
 
@@ -212,7 +212,7 @@ async def test_only_generate_node_tokens_stream_and_no_fallback_once_sent(monkey
     model, but its streamed text must never reach the browser as `token`; only "generate"'s text
     does, empty chunks are skipped, and once real tokens streamed no fallback token is added."""
 
-    def two_node_build_graph(model, checkpointer=None):
+    def two_node_build_graph(model, checkpointer=None, classifier=None):
         async def other(state):
             # A plain model call from a node that isn't "generate" — stands in for intent/reason,
             # whose structured-output calls must stay invisible to the chat (contracts.md § 9).
@@ -320,7 +320,7 @@ async def test_disconnect_mid_stream_still_saves_the_run(monkeypatch, tmp_path):
     land mid-turn instead of racing the (very fast) fake model to the finish.
     """
 
-    def hanging_build_graph(model, checkpointer=None):
+    def hanging_build_graph(model, checkpointer=None, classifier=None):
         async def hang(state):
             await anyio.sleep(3600)  # cancelled by the disconnect below long before this fires
 
