@@ -32,8 +32,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-# Longest message accepted, in characters (~1,000 tokens). Protects cost and latency.
-MAX_INPUT_CHARS = 4000
+# Longest message accepted, in characters (~250 tokens). Protects cost and latency.
+MAX_INPUT_CHARS = 1000
 
 # Each rule has a name (shown in the trace panel and the refusal) and a compiled regex.
 # re.IGNORECASE makes every rule case-insensitive: "IGNORE PREVIOUS INSTRUCTIONS" matches too.
