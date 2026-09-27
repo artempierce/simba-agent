@@ -1,6 +1,6 @@
 /**
- * chatsApi.ts — fetch helpers for the chat sidebar (step 6): list, create, rename and delete chats,
- * and load one chat's messages and trace runs. Talks to `simba/chats_api.py` per docs/contracts.md § 10.
+ * chatsApi.ts — fetch helpers for the chat sidebar (step 6): list, rename and delete chats, and load
+ * one chat's messages and trace runs. Talks to `simba/chats_api.py` per docs/contracts.md § 10.
  *
  * `Sidebar.tsx` and `App.tsx` call these functions and get back typed data or a thrown `Error` —
  * never a raw `Response` — so callers don't each have to repeat status-checking and JSON parsing.
@@ -32,17 +32,6 @@ export async function listChats(): Promise<Chat[]> {
   const res = await fetch(BASE)
   if (!res.ok) await throwForStatus(res)
   return (await res.json()) as Chat[]
-}
-
-/** Create a chat; an omitted title becomes "New chat" server-side (POST /api/chats). */
-export async function createChat(title?: string): Promise<Chat> {
-  const res = await fetch(BASE, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(title === undefined ? {} : { title }),
-  })
-  if (!res.ok) await throwForStatus(res)
-  return (await res.json()) as Chat
 }
 
 /** Load one chat's row plus its rendered messages and trace runs (GET /api/chats/{id}). */

@@ -9,6 +9,7 @@
  * like any other content (no separate live region).
  */
 import { useEffect, useRef, useState } from 'react'
+import type { KeyboardEvent } from 'react'
 import type { Chat } from '../types'
 
 /** What the sidebar needs from its owner, and how it reports interaction back up. */
@@ -30,14 +31,17 @@ type RowMode = { kind: 'menu' | 'rename' | 'delete'; id: string }
  * of local UI state (which row's menu/rename/delete is open) needed to drive that interaction.
  *
  * Main logic, per row:
- * 1. While the "⋯" menu is open, close it on Esc or a click outside that row.
- * 2. Commit (or drop) a rename and always close the input.
- * 3. Render an open rename as a text input in place of the title/⋯ pair.
- * 4. Render an open delete confirmation as inline "Delete this chat? Yes / Cancel".
- * 5. Otherwise render the normal row: a title button plus a "⋯" button that opens the menu.
+ * 1. Escape, anywhere in the sidebar, leaves whatever mode the active row is in (menu, rename, or
+ *    delete) — handled once, on the root element, rather than by each mode separately.
+ * 2. While the "⋯" menu is open, close it on a click outside that row (Escape is step 1's job now).
+ * 3. Commit (or drop) a rename and always close the input.
+ * 4. Render an open rename as a text input in place of the title/⋯ pair.
+ * 5. Render an open delete confirmation as inline "Delete this chat? Yes / Cancel".
+ * 6. Otherwise render the normal row: a title button plus a "⋯" button that opens the menu.
  *
- * Whenever a row leaves menu/rename/delete mode (step 1's Esc/outside-click, or Cancel), focus
- * returns to that row's "⋯" button so keyboard/screen-reader focus never falls back to `<body>`.
+ * Whenever a row leaves menu/rename/delete mode (Escape, an outside click, a rename's blur, or
+ * Cancel), focus returns to that row's "⋯" button so keyboard/screen-reader focus never falls back
+ * to `<body>`.
  */
 export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }: Props) {
   const [mode, setMode] = useState<RowMode | null>(null)
@@ -48,22 +52,28 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
   // null we know whose "⋯" button should get focus back.
   const lastRowId = useRef<string | null>(null)
 
-  // 1. While the "⋯" menu is open, close it on Esc or on any click outside that row.
+  /**
+   * 1. Escape leaves the active row's mode, whatever it is. `preventDefault` matters here: a caller
+   * embedding the Sidebar in an overlay (see MobileDrawer.tsx) can check `e.defaultPrevented` to tell
+   * "the Sidebar already handled this Escape" from "nothing here cared", so the overlay only closes
+   * itself on the latter.
+   */
+  function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (mode && e.key === 'Escape') {
+      setMode(null)
+      e.preventDefault()
+    }
+  }
+
+  // 2. While the "⋯" menu is open, close it on any click outside that row.
   useEffect(() => {
     if (mode?.kind !== 'menu') return
     function onPointerDown(e: MouseEvent) {
       const row = (e.target as HTMLElement).closest('[data-chat-row]')
       if (!row || row.getAttribute('data-chat-row') !== mode?.id) setMode(null)
     }
-    function onKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') setMode(null)
-    }
     document.addEventListener('mousedown', onPointerDown)
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('mousedown', onPointerDown)
-      document.removeEventListener('keydown', onKeyDown)
-    }
+    return () => document.removeEventListener('mousedown', onPointerDown)
   }, [mode])
 
   // Track which row is/was in a special mode, and once it goes back to null, hand focus back to
@@ -83,7 +93,7 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
   }
 
   /**
-   * 2. Commits (or silently drops) a rename and always closes the input.
+   * 3. Commits (or silently drops) a rename and always closes the input.
    * Trims the value first; an empty result cancels rather than saving, matching the 1-80 character
    * rule the backend enforces (docs/contracts.md § 10) — there's nothing valid to send otherwise.
    */
@@ -94,7 +104,7 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
   }
 
   return (
-    <div className="flex h-full w-64 flex-col gap-2 bg-bg p-3">
+    <div className="flex h-full w-64 flex-col gap-2 bg-bg p-3" onKeyDown={onKeyDown}>
       <button
         type="button"
         onClick={onNew}
@@ -110,7 +120,7 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
           const active = chat.id === activeId
           const menuOpen = mode?.kind === 'menu' && mode.id === chat.id
 
-          // 3. Rename mode: the row becomes a text input in place of the title/⋯ pair.
+          // 4. Rename mode: the row becomes a text input in place of the title/⋯ pair.
           if (mode?.kind === 'rename' && mode.id === chat.id) {
             return (
               <li key={chat.id} data-chat-row={chat.id}>
@@ -119,8 +129,14 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
                   value={renameValue}
                   onChange={(e) => setRenameValue(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') e.currentTarget.blur() // onBlur below saves it
-                    else if (e.key === 'Escape') setMode(null) // React 19 doesn't fire onBlur for this removal
+                    // Without preventDefault, the browser's default Enter behaviour still runs after
+                    // blur() moves focus to the "⋯" button below (the next focusable element) — which
+                    // reopens its menu, since a plain Enter on a focused button "clicks" it.
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      e.currentTarget.blur() // onBlur below saves it
+                    }
+                    // Escape is handled by the root's onKeyDown above.
                   }}
                   onBlur={() => saveRename(chat.id)}
                   maxLength={80}
@@ -131,7 +147,7 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
             )
           }
 
-          // 4. Delete mode: the row becomes an inline confirmation, never window.confirm.
+          // 5. Delete mode: the row becomes an inline confirmation, never window.confirm.
           if (mode?.kind === 'delete' && mode.id === chat.id) {
             return (
               <li
@@ -162,7 +178,7 @@ export function Sidebar({ chats, activeId, onSelect, onNew, onRename, onDelete }
             )
           }
 
-          // 5. Normal row: title button (selects the chat) + "⋯" button (opens the menu below it).
+          // 6. Normal row: title button (selects the chat) + "⋯" button (opens the menu below it).
           return (
             <li key={chat.id} data-chat-row={chat.id}>
               <div className={`flex items-stretch rounded-md ${active ? 'bg-raised' : 'hover:bg-raised'}`}>
