@@ -8,7 +8,7 @@ only** — never its characters, logo, names or copy. Every drawing in Simba is 
 
 A warm paper page, a bookish serif for headings, black pill buttons, white rounded cards with a thin
 ink border, pastel accent cards, and thick-outline black-and-white doodle art — friendly, a little
-funny, very readable. The trace panel stays a dark terminal column (it's the "engine room").
+funny, very readable. The trace panel uses the same paper-and-cards style (see Screens).
 
 ## Tokens (`frontend/src/index.css` `@theme`)
 
@@ -27,7 +27,7 @@ funny, very readable. The trace panel stays a dark terminal column (it's the "en
 | `blush` | `#EFD0DF` | pastel card |
 | `coral` | `#EDB6A3` | pastel card, warnings that aren't errors |
 | `danger` | `#B3261E` | errors, delete |
-| trace: `term` `#161616`, `term-ink` `#E9E7E1`, `term-dim` `#8C8A84`, `term-rule` `#2B2A28`; stage colours stay pastel-bright on dark |
+| `mint` | `#CDE8D4` | pastel pill for the generate stage in the trace |
 
 Keep contrast ≥ 4.5:1 for text (ink on every pastel passes).
 
@@ -60,14 +60,20 @@ Keep contrast ≥ 4.5:1 for text (ink on every pastel passes).
   one sends that prompt.
 - **Chat:** Simba's replies start with a small avatar; your bubbles are `sky` with ink text; the input
   is a white rounded card with an ink border and a black pill "Send".
-- **Trace panel:** dark `term` column; each run a card with `term-rule` border; ⚑ flagged lines keep
-  their stage colour.
+- **Trace panel (updated 2026-09-27, Sol: "match design for right trace part"):** no longer a dark
+  terminal. It sits on the paper background like the sidebar, with a serif "Trace" title. Each run is a
+  white card with a 1.5px ink border and rounded corners. Stage names are small pastel pills with ink
+  text: guard `butter`, intent `sky`, reason `blush`, generate `mint`, refuse `coral`. Details stay in
+  JetBrains Mono, ink on white; times and the footer in `muted`. Status icons in ink: ✓ ok, ⛔ blocked,
+  ✕ error, ⚑ flagged. A blocked or error line gets a soft `coral` row background so it stands out;
+  a flagged line keeps its stage pill. The `term-*` and `t-*` tokens go away once nothing uses them.
 
 ## Simba avatar (#21)
 
 `<SimbaAvatar mood size />` in `components/SimbaAvatar.tsx`, inline SVG, `viewBox="0 0 64 64"`, no image
-files. An original funny cat: round head, big pointy ears, whiskers, a small scruffy tuft on top (a
-wink at the lion name), thick ink outline, white fill, solid black nose and details.
+files. An original funny cat: round head, two big pointy ears — **both upright and symmetric, no bent
+or floppy ear** (Sol, 2026-09-27: the bent ear looked strange) — whiskers, a small scruffy tuft on top
+(a wink at the lion name), thick ink outline, white fill, solid black nose and details.
 
 | Mood | When (`moodFor(run, busy)`) | Face |
 |---|---|---|

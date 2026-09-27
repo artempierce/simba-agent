@@ -172,7 +172,7 @@ const EXTRAS: Partial<Record<Mood, ReactNode>> = {
  * height in pixels (the drawing scales, so 40 in a chat row and 96 on the welcome card both work).
  *
  * Drawing order (later on top):
- *   1. ears   — one pointy, one with a floppy bent tip, each with a solid inner ear
+ *   1. ears   — two big upright points, mirror images, each with a solid inner ear
  *   2. head   — a wide, slightly squashed circle that covers the ears' bases
  *   3. tuft   — a scruffy three-spike tuft of hair on top (a wink at "Simba" the lion)
  *   4. whiskers and nose
@@ -184,12 +184,12 @@ export function SimbaAvatar({ mood, size = 40 }: { mood: Mood; size?: number }) 
       <style>{KEYFRAMES}</style>
       {/* Defaults for every shape inside: white fill, rounded ink lines. Shapes override as needed. */}
       <g fill="white" stroke="currentColor" strokeWidth={OUTLINE} strokeLinecap="round" strokeLinejoin="round">
-        {/* 1. Ears. Left: a tall point. Right: the tip flops over, with a fold line. */}
+        {/* 1. Ears: two tall points, each with a solid inner ear. The right one mirrors the left
+            across the centre line x = 32 (every x becomes 64 − x). */}
         <path d="M12 30 L9 5 L28 18 Z" />
         <path d="M14.5 21 L13 12 L20.5 17.5 Z" fill="currentColor" stroke="none" />
-        <path d="M37 18 L47 8 L52 10 L55 30 Z" />
-        <path d="M47 8 L52 10 L61 17 Z" fill="currentColor" />
-        <path d="M45 17 L48.5 13 L50.5 20 Z" fill="currentColor" stroke="none" />
+        <path d="M52 30 L55 5 L36 18 Z" />
+        <path d="M49.5 21 L51 12 L43.5 17.5 Z" fill="currentColor" stroke="none" />
 
         {/* 2. Head. */}
         <ellipse cx="32" cy="37" rx="25" ry="21" />
