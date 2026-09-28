@@ -155,7 +155,7 @@
       <p class="eyebrow">simba-agent · design book</p>
       <h1>Simba Design Book</h1>
       <div class="meta">
-        <span class="pill">0.3 draft, awaiting approval</span>
+        <span class="pill">0.3 approved</span>
         <span>Version 0.3 · 28 Sep 2026</span>
         <span>Repo <code>/Users/sol/simba-agent</code></span>
       </div>
@@ -164,7 +164,7 @@
     <section id="summary">
       <h2>Summary</h2>
       <p class="lead">Simba is a small, friendly AI assistant built as a learning lab. It has three layers: a <strong>harness</strong> of safety hooks listed in one settings file, a <strong>LangGraph graph</strong> that decides what runs next, and one <strong>agent</strong> node that makes a single model call to understand, decide and reply.</p>
-      <p>This book has two parts. <strong>Part A</strong> describes how I, Claude Code, run my own loop, guardrails and memory, as a reference model. <strong>Part B</strong> is Simba's design. The MVP (steps 0–6) is built. Version 0.3 redesigns the pipeline into the three layers above. Coding the redesign starts after you approve this version and answer the <a href="#questions">open questions</a>.</p>
+      <p>This book has two parts. <strong>Part A</strong> describes how I, Claude Code, run my own loop, guardrails and memory, as a reference model. <strong>Part B</strong> is Simba's design. The MVP (steps 0–6) is built. Version 0.3 redesigns the pipeline into the three layers above. You approved it on 28 Sep; the code follows in steps H2 and H3 (see <a href="#build">Build steps</a>).</p>
     </section>
 
     <section id="changes">
@@ -278,7 +278,7 @@ flowchart TD
       <h2>Harness, graph, agent</h2>
       <p>Each of the three layers has one job. Keeping them apart is what makes the structure easy to grow.</p>
       <div class="grid-3">
-        <div class="box layer"><h4>Harness</h4><p><strong>The rules.</strong> Which checks run, in what order, and what happens when one fails. Plain code, no model, $0. Lives in <code>settings.py</code>, <code>hooks.py</code> and the check files.</p></div>
+        <div class="box layer"><h4>Harness</h4><p><strong>The rules.</strong> Which checks run, in what order, and what happens when one fails. Plain code, no model, $0. Lives in the <code>simba/harness/</code> folder.</p></div>
         <div class="box layer"><h4>Graph</h4><p><strong>The map.</strong> Who runs next. LangGraph nodes and edges, plus the checkpointer that saves each chat. Lives in <code>graph.py</code>.</p></div>
         <div class="box layer"><h4>Agent</h4><p><strong>The thinking.</strong> One model call that understands the message, decides what to do and writes the reply. Lives in <code>nodes/agent.py</code> and <code>prompts/system.md</code>.</p></div>
       </div>
@@ -328,7 +328,7 @@ flowchart TD
     <section id="settings">
       <h2>settings.py</h2>
       <p>This is the one place to see or change which checks run. Order matters: cheapest first, so a message the size check rejects never reaches the classifier.</p>
-      <p class="file-label">backend/simba/settings.py · sketch</p>
+      <p class="file-label">backend/simba/harness/settings.py · sketch</p>
 <pre class="code"><span class="c"># Which hooks run at each hook point, in order. First "block" wins.</span>
 BEFORE_MODEL = [size_limit, injection_rules, injection_classifier]
 AFTER_MODEL  = [no_secrets, no_internal_tags, no_prompt_leak]
@@ -529,12 +529,13 @@ Safety
 ├── graph.py          the map: before_model → agent → after_model, refuse
 ├── state.py          messages, verdict, flag
 ├── model.py          real Claude or the fake model; cost per call
-├── settings.py       NEW  which hooks run at each hook point
-├── hooks.py          NEW  HookResult + the hook runner
-├── guard.py          input checks: size + injection rules   (see Q12)
-├── classifier.py     local injection classifier (flags only)
-├── output_guard.py   output checks: secrets, tags, prompt leak
 ├── schemas.py        ReportUnsafe (was IntentCheck, Decision)
+├── harness/          NEW  the rules around the model (D26)
+│   ├── settings.py     NEW  which hooks run at each hook point
+│   ├── hooks.py        NEW  HookResult + the hook runner
+│   ├── guard.py        moved: input checks, size + injection rules
+│   ├── classifier.py   moved: local injection classifier (flags only)
+│   └── output_guard.py moved: output checks, secrets, tags, prompt leak
 ├── nodes/
 │   ├── hook_points.py  NEW  before_model + after_model nodes
 │   ├── agent.py        NEW  the one model call
@@ -573,7 +574,7 @@ Safety
         <thead><tr><th>Step</th><th>What gets built</th><th>Status</th></tr></thead>
         <tbody>
           <tr><td>0–6 · MVP</td><td class="wrap">Repo, skeleton, guard, intent, reason, generate, chats sidebar; then classifier (#8), real Claude + token counts (#9), output guard (#15), redesign (#20, #21)</td><td><span class="chip done">done</span></td></tr>
-          <tr><td>H1 · Design book</td><td class="wrap">This version: harness, graph, agent (#11)</td><td><span class="chip next">in review</span></td></tr>
+          <tr><td>H1 · Design book</td><td class="wrap">This version: harness, graph, agent (#11)</td><td><span class="chip done">done</span></td></tr>
           <tr><td>H2 · Hooks in settings</td><td class="wrap"><code>settings.py</code>, <code>hooks.py</code>, the two hook-point nodes; delete the guard and output_guard nodes. Done when the old guard and output tests pass through the new nodes.</td><td><span class="chip next">next</span></td></tr>
           <tr><td>H3 · One agent node</td><td class="wrap"><code>nodes/agent.py</code> + <code>report_unsafe</code>; delete intent, reason, generate, their prompts, schemas and state fields; update API streaming, contracts and trace. Done when all tests pass on the fake model.</td><td><span class="chip next">next</span></td></tr>
           <tr><td>7 · Personality</td><td class="wrap">Tune <code>system.md</code> together (#10)</td><td><span class="chip later">after H3</span></td></tr>
@@ -612,17 +613,17 @@ Safety
           <tr><td>D23</td><td class="wrap">Our own hook runner, not LangChain's <code>create_agent</code> middleware</td><td class="wrap">Sol, 28 Sep</td></tr>
           <tr><td>D24</td><td class="wrap">No separate LLM safety check: the classifier's flag becomes a note in the agent's prompt, and <code>report_unsafe</code> is the model's structured "no"</td><td class="wrap">Sol, 28 Sep</td></tr>
           <tr><td>D25</td><td class="wrap">LangGraph stays the engine for tools, owner approval and subagents</td><td class="wrap">Sol, 28 Sep</td></tr>
+          <tr><td>D26</td><td class="wrap">Harness files live in a <code>simba/harness/</code> folder: <code>settings.py</code>, <code>hooks.py</code>, <code>guard.py</code>, <code>classifier.py</code>, <code>output_guard.py</code></td><td class="wrap">Sol, 28 Sep (Q12)</td></tr>
         </tbody>
       </table></div>
     </section>
 
     <section id="questions">
       <h2>Open questions</h2>
-      <p>Answered one at a time before H2 starts. The last column is my recommendation, not a decision.</p>
+      <p>Answered one at a time before H2 starts (Q12 became D26). The last column is my recommendation, not a decision.</p>
       <div class="table-wrap"><table>
         <thead><tr><th>#</th><th>Question</th><th>Recommendation</th></tr></thead>
         <tbody>
-          <tr><td>Q12</td><td class="wrap">Group the harness files (<code>settings.py</code>, <code>hooks.py</code>, <code>guard.py</code>, <code>classifier.py</code>, <code>output_guard.py</code>) into a <code>simba/harness/</code> folder, or keep them flat next to <code>graph.py</code>?</td><td class="wrap default">Folder: the three layers become visible in the file tree</td></tr>
           <tr><td>Q13</td><td class="wrap">Trace: one line per hook point with results inline, or one line per hook?</td><td class="wrap default">One line per hook point: the panel stays short, the detail still names each hook</td></tr>
           <tr><td>Q14</td><td class="wrap">Step names in the trace: <code>before_model</code> / <code>after_model</code>, or plain words like "input check" / "reply check"?</td><td class="wrap default">The code names, so the trace matches the code you read</td></tr>
         </tbody>
