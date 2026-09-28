@@ -12,8 +12,11 @@ live in a trace panel next to the chat.
 ```
 your message → guard (code rules + local classifier) ─┬─ blocked → refuse (fixed reply)
                                                       └─ pass (maybe ⚑ flagged) → intent (LLM: restate + safety verdict) ─┬─ unsafe → refuse
-                                                                                                                         └─ safe → reason (LLM: action + plan) → generate (LLM: streamed answer)
+                                                                                                                         └─ safe → reason (LLM: action + plan) → generate (LLM: streamed answer) → output guard (code checks; retracts a leak)
 ```
+
+**Planned redesign** (design book 0.3, #32 / #33): the checks become hooks listed in
+`harness/settings.py`, and intent + reason + generate become one `agent` node — one model call per turn.
 
 The guard has two layers: regex rules that **block**, then a small local model
 (`protectai/deberta-v3-base-prompt-injection-v2`, runs on your CPU, $0) that only **flags** (⚑). A flag
@@ -28,7 +31,7 @@ never blocks on its own: it tells the intent check to look carefully, and the LL
 | 2 | Guard + refuse | done |
 | 3 | Intent check | done |
 | 4 | Reason | done |
-| 5 | Generate (first real Claude call after the owner's OK) | done (fake model; real Claude awaits OK) |
+| 5 | Generate, then real Claude + token counts (#9) and the output guard (#15) | done |
 | 6 | Chats sidebar: new, open, rename, delete | done |
 | 7 | Personality tuning | planned |
 
@@ -66,7 +69,8 @@ simba-agent/
 │   ├── graph.py              draws the graph: which nodes run, in what order
 │   ├── guard.py              the code guard's rules: size limit (1,000 chars) + prompt-injection patterns
 │   ├── classifier.py         the local prompt-injection model the guard uses to flag (⚑) messages
-│   ├── nodes/                one file per graph node: guard, intent, reason, generate, refuse
+│   ├── output_guard.py       checks on the finished answer: secrets, internal tags, prompt leaks
+│   ├── nodes/                one file per graph node: guard, intent, reason, generate, output_guard, refuse
 │   ├── model.py              real Claude or the free fake model; cost per call
 │   ├── state.py              the graph's state
 │   ├── schemas.py            structured-output shapes (IntentCheck, Decision)
