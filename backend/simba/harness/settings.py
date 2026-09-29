@@ -4,16 +4,21 @@ D22/D26). `simba/nodes/hook_points.py` reads these lists; it never decides for i
 exist.
 
 Four hook points exist in the design (design book 0.3 § Hook points), one before and one after each
-of the two kinds of model call the agent will eventually make: `before_model`/`after_model` (this
-ticket) and `before_tool`/`after_tool` (#17, once Simba has tools). The two tool lists are empty for
-now — `nodes/hook_points.py` doesn't even wire a node for them yet — so a future ticket can add tool
-hooks by filling these lists, never by touching the runner or the graph.
+model or tool call: `before_model`/`after_model` and `before_tool`/`after_tool` (#17). The first
+tool is read-only web search; its hooks are listed here so checks stay separate from the runner
+and graph wiring.
 """
 
 from simba.harness.classifier import InjectionClassifier, classifier_hook
 from simba.harness.guard import injection_rules, size_limit
 from simba.harness.hooks import Hook
 from simba.harness.output_guard import no_internal_tags, no_prompt_leak, no_secrets
+from simba.harness.tool_hooks import (
+    allowlisted_tool_call,
+    flag_instruction_like_tool_result,
+    valid_web_search_query,
+    within_web_search_budget,
+)
 
 
 def before_model_hooks(classifier: InjectionClassifier | None) -> list[Hook]:
@@ -35,6 +40,6 @@ def before_model_hooks(classifier: InjectionClassifier | None) -> list[Hook]:
 # reads and scans every prompt file. No classifier here; the output guard is code-only (§ 7.7).
 AFTER_MODEL: list[Hook] = [no_secrets, no_internal_tags, no_prompt_leak]
 
-# #17: filled in when Simba gets its first tool.
-BEFORE_TOOL: list[Hook] = []
-AFTER_TOOL: list[Hook] = []
+# #17: only the read-only web_search tool is exposed; returned page text is untrusted.
+BEFORE_TOOL: list[Hook] = [allowlisted_tool_call, valid_web_search_query, within_web_search_budget]
+AFTER_TOOL: list[Hook] = [flag_instruction_like_tool_result]

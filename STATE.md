@@ -9,11 +9,11 @@ Harness redesign done (design book 0.3): hooks listed in `harness/settings.py` r
 (#32); one `agent` node replaces intent/reason/generate (#33).
 
 ## Current focus
-None open — next items need the owner's input before they can be planned (see Next up).
+Ticket #17: first read-only tool (Tavily web search), tool hooks, and the ReAct loop.
 
 ## Next up (post-MVP)
 - #10 Personality prompts (needs owner, one `system.md` to tune)
-- #17 First tool + ReAct loop, before/after_tool hooks (settings.py's empty lists) → then #30 self-improvement (propose → approve → install)
+- #30 Self-improvement (propose → approve → install), after the tool and approval design is ready
 - #12 Frontend tests (Vitest) · #16 Per-chat cost budget · #13 / #14 memory designs
 
 ## Recently done
@@ -27,7 +27,8 @@ redesign) · #9 real Claude + token counts in trace · #15 output guard
 |---|---|
 | Change a graph step | `backend/simba/nodes/<step>.py`, wiring in `graph.py`, fields in `state.py`, `docs/contracts.md` |
 | Prompts / personality | `backend/simba/prompts/system.md` (the only prompt) |
-| Hook points (before/after_model) | `harness/settings.py` (which hooks run), `harness/hooks.py` (the runner), `nodes/hook_points.py` (graph glue) |
+| Hook points (model/tool) | `harness/settings.py`, `harness/hooks.py`, `harness/tool_hooks.py`, `nodes/hook_points.py` |
+| Web search | `backend/simba/tools/web_search.py` (Tavily, requires optional `TAVILY_API_KEY`) |
 | Input checks | `harness/guard.py` (rules), `harness/classifier.py` (local model) |
 | Output checks | `harness/output_guard.py` |
 | Model, cost, tokens | `model.py` |

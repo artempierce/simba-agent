@@ -115,7 +115,9 @@ class FakeChatModel(BaseChatModel):
         """
         self.calls.append(list(messages))
         tokens_in = max(1, sum(len(str(m.content)) for m in messages) // 4)
-        name = next((n for n in self.bound if n in self.structured), None)
+        last_user = next((i for i in range(len(messages) - 1, -1, -1) if messages[i].type == "human"), -1)
+        tool_replied_this_turn = any(message.type == "tool" for message in messages[last_user + 1 :])
+        name = None if tool_replied_this_turn else next((n for n in self.bound if n in self.structured), None)
         if name is not None:
             usage = {"input_tokens": tokens_in, "output_tokens": 20, "total_tokens": tokens_in + 20}
             return "", {"name": name, "args": self.structured[name], "id": "fake-call-1"}, usage

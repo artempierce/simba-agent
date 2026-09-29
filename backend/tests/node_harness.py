@@ -14,7 +14,13 @@ from langgraph.graph import END, START, StateGraph
 from simba.state import ChatState
 
 # The per-turn fields at their "fresh turn" values (contracts.md § 4). Merged under the test's state.
-EMPTY_TURN: dict[str, Any] = {"messages": [], "verdict": None, "flag": None}
+EMPTY_TURN: dict[str, Any] = {
+    "messages": [],
+    "verdict": None,
+    "flag": None,
+    "tool_call_blocked": None,
+    "web_search_calls": 0,
+}
 
 
 async def run_node(node, state: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:

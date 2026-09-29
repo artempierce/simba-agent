@@ -1,8 +1,8 @@
 # Simba
 
 A small, friendly AI assistant built as a **learning lab**. Every message goes through a visible
-pipeline — a code guard, then one agent call that answers (or refuses) — and each step shows up
-live in a trace panel next to the chat.
+pipeline — a code guard, then an agent that can answer, refuse, or search the web — and each step
+shows up live in a trace panel next to the chat.
 
 - Requirements (why, and what "working" means): [`docs/requirements.md`](docs/requirements.md)
 - Design book (how): [`docs/design.html`](docs/design.html) · [published version](https://claude.ai/artifact/Kh7t1hNsLvJdULwHgEtsSD)
@@ -12,13 +12,14 @@ live in a trace panel next to the chat.
 ## How one message flows
 
 ```
-your message → before_model (hooks: size + regex + local classifier) ─┬─ blocked → refuse (fixed reply)
-                                                                      └─ pass (maybe ⚑ flagged) → agent (LLM: one call that answers, or calls report_unsafe) ─┬─ answer → after_model (hooks: retracts a leak)
-                                                                                                                                                            └─ report_unsafe → refuse
+your message → before_model ─┬─ blocked → refuse
+                             └─ pass → agent ─┬─ answer → after_model → done
+                                              ├─ report_unsafe → refuse
+                                              └─ web_search → before_tool → Tavily → after_tool → agent (loop)
 ```
 
-Each hook point (`before_model`, `after_model`; `before_tool`/`after_tool` come with #17) runs the
-checks `harness/settings.py` lists for it, cheapest first, and stops at the first block (#32).
+Each hook point (`before_model`, `after_model`, `before_tool`, `after_tool`) runs the checks listed
+in `harness/settings.py`, cheapest first, and stops at the first block (#32, #17).
 
 The before_model hooks have two layers: regex rules that **block**, then a small local model
 (`protectai/deberta-v3-base-prompt-injection-v2`, runs on your CPU, $0) that only **flags** (⚑). A flag
@@ -37,6 +38,7 @@ never blocks on its own: it tells the agent to look carefully, and the LLM makes
 | 6 | Chats sidebar: new, open, rename, delete | done |
 | — | Harness redesign: guard/output_guard become before_model/after_model hooks (#32) | done |
 | — | Harness redesign: intent + reason + generate become one `agent` node (#33) | done |
+| 17 | First read-only tool: optional Tavily web search + ReAct loop | in progress |
 | 7 | Personality tuning | planned |
 
 **Known gap:** the frontend has no automated tests yet (only lint + type-check + build in CI). The
@@ -54,6 +56,10 @@ cd backend && uv run python -m simba.harness.classifier   # optional, once: down
 cd backend && uv run uvicorn simba.api:app --reload --port 8000
 cd frontend && npm install && npm run dev     # http://localhost:5173
 ```
+
+Web search is optional. Add `TAVILY_API_KEY` to `backend/.env` to enable it; when the variable is
+empty or missing, Simba starts normally without binding the search tool. Tests use a fake Tavily
+client and never make an external search request. Each user turn is limited to three search calls.
 
 ## Repo layout
 
@@ -79,8 +85,10 @@ simba-agent/
 │   │   ├── classifier.py     the local prompt-injection model + classifier_hook, flags (⚑) messages
 │   │   ├── output_guard.py   after_model hooks: secrets, internal tags, prompt leaks
 │   │   ├── hooks.py          HookResult, Hook, and run_hooks (the hook runner)
+│   │   ├── tool_hooks.py     allowlist, query length, and untrusted-result scan
 │   │   └── settings.py       which hooks run at each hook point, in which order
 │   ├── nodes/                one file per graph node: hook_points (before_model/after_model), agent, refuse
+│   ├── tools/web_search.py   optional Tavily client, capped/untrusted results
 │   ├── model.py              real Claude or the free fake model; cost per call
 │   ├── state.py              the graph's state
 │   ├── schemas.py            structured-output shape (ReportUnsafe)
