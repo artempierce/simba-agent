@@ -19,11 +19,12 @@ from langgraph.graph.message import add_messages
 
 
 class Verdict(TypedDict):
-    """A safety check's result for this turn, written by the guard node and then the intent node.
+    """A safety check's result for this turn, written by before_model, and overwritten by the agent
+    node only when it calls report_unsafe (#33).
 
     status  "pass" or "blocked" — the conditional edges route on this
     rule    None when passed; else which check blocked it, e.g. "size", "ignore-instructions",
-            "intent-injection", "intent-harmful"
+            "agent-injection", "agent-harmful"
     reason  one readable sentence, shown in the trace panel
     """
 
