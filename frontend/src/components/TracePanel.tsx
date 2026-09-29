@@ -74,7 +74,11 @@ export function TracePanel({ runs, busy }: { runs: Run[]; busy: boolean }) {
       <header className="border-b border-rule px-4 py-3.5">
         <h2 className="font-serif text-lg font-semibold">Trace</h2>
       </header>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+      {/* `relative` keeps the lines' sr-only labels inside this scroll box. sr-only is
+          `position: absolute`, and an absolute element is placed against its nearest *positioned*
+          ancestor — without one here, that was the page itself, so every label below the fold
+          stretched the page and left empty space to scroll into. */}
+      <div className="relative min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {/* 2. */}
         {runs.length === 0 && (
           <p className="leading-relaxed text-muted">
