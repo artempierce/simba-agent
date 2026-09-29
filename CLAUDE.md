@@ -28,7 +28,7 @@ when a session works in those files.
 ```bash
 cd backend && uv run pytest -q --tb=short
 cd backend && SIMBA_FAKE_LLM=1 uv run uvicorn simba.api:app --reload --port 8000
-cd frontend && npm run lint && npm run build     # build includes the TypeScript check
+cd frontend && npm run lint && npm test && npm run build   # build includes the TypeScript check
 cd frontend && npm run dev                        # http://localhost:5173
 ```
 

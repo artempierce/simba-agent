@@ -2,7 +2,7 @@
 #
 # Three jobs run side by side; a PR may merge when all are green:
 #   backend   the Python test suite with the free fake model (no API key, no secrets, $0)
-#   frontend  lint, type-check and production build of the web app
+#   frontend  lint, unit tests (Vitest), type-check and production build of the web app
 #   smoke     start the real API server (fake model) and talk to it over HTTP, like the browser does
 
 name: CI
@@ -68,6 +68,10 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      # The job keeps its old name: branch protection requires a check called "Frontend lint + build".
+      - name: Unit tests (Vitest)
+        run: npm test
 
       - name: Type-check and build
         run: npm run build
