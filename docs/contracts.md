@@ -339,7 +339,8 @@ parser, not EventSource, because it's a POST).
 
 Components: `App.tsx` (owns state: messages, runs, busy, chats, chatId), `ChatView.tsx`
 (messages + input; assistant text rendered as Markdown with `react-markdown`), `TracePanel.tsx`
-(ported from art-lab; stage colours for guard/intent/reason/generate/refuse), and from step 6
+(ported from art-lab; stage colours for before_model/intent/reason/generate/after_model/refuse,
+plus guard/output_guard for chats saved before #32), and from step 6
 `Sidebar.tsx`: props `{chats, activeId, onSelect(id), onNew(), onRename(id, title), onDelete(id)}` —
 "⋯" menu per row with Rename (inline edit, Enter saves, Esc cancels) and Delete (inline
 "Delete this chat? Yes / Cancel"; never `window.confirm`); `MobileDrawer.tsx` shows the Sidebar as an

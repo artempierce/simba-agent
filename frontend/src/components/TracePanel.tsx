@@ -11,7 +11,7 @@
  * than a separate "engine room" screen.
  *
  * One block per Run (one Run per message you sent), one line per trace event, e.g.
- *   ✓ [guard]        pass · 38 chars                                            1ms
+ *   ✓ [before_model] pass · 38 chars · rules ok · classifier 0.02               1ms
  *   ✓ [intent]       safe · "weekend ideas for Lisbon"                       640ms
  *   ✓ [generate]     42 tokens out                                           810ms
  *   612 tok · $0.0007 · 1.5s                            ← footer, once the run finishes
@@ -34,7 +34,7 @@ const STAGE_PILL: Record<string, string> = {
   intent: 'bg-sky',
   reason: 'bg-blush',
   generate: 'bg-mint',
-  after_model: 'bg-butter', // same colour as before_model: both are code + one local model call
+  after_model: 'bg-butter', // same colour as before_model: both are hook points running code checks
   output_guard: 'bg-butter', // saved before #32: same colour as guard, both are code checks (#15)
   refuse: 'bg-coral',
 }
