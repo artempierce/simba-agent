@@ -59,7 +59,7 @@ cd frontend && npm install && npm run dev     # http://localhost:5173
 simba-agent/
 ├── CLAUDE.md                 rules for AI coding sessions (backend/ and frontend/ have their own, loaded on demand)
 ├── STATE.md                  current focus + where to look (imported by CLAUDE.md)
-├── .claude/                  shared Claude Code setup: settings.json, rules/, skills/ (/ticket, /pr-review)
+├── .claude/                  shared Claude Code setup: settings.json, rules/ (skills /ticket and /pr-review are global)
 ├── docs/requirements.md      why Simba exists, acceptance criteria
 ├── docs/design.html          design book
 ├── docs/decisions/           decision log (D1…)
