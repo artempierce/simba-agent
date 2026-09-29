@@ -15,6 +15,10 @@ from simba.harness.hooks import HookResult
 # Keep model-written queries useful but bounded before they reach the external search provider.
 MAX_WEB_SEARCH_QUERY_CHARS = 500
 
+# #52: the search filters the model may choose. Tavily also has "finance"; it's left out until needed.
+TOPICS = ("general", "news")
+TIME_RANGES = ("day", "week", "month", "year")
+
 # A single answer can use several searches, but cannot loop indefinitely against a metered provider.
 MAX_WEB_SEARCH_CALLS_PER_TURN = 3
 
@@ -42,6 +46,28 @@ def valid_web_search_query(serialized_call: str) -> HookResult:
     if len(query) > MAX_WEB_SEARCH_QUERY_CHARS:
         return HookResult("block", "web-search-query-size", "search query is too long")
     return HookResult("allow", None, "search query is valid")
+
+
+def valid_web_search_filters(serialized_call: str) -> HookResult:
+    """Allow only the known `topic` and `time_range` values (#52); both are optional.
+
+    Why a hook when the tool's type hints already list the values: the hints guide the model, but
+    the rule "only these filters reach Tavily" should be plain code that a test can check, not a
+    side effect of how LangChain validates arguments.
+
+    Example: {"topic": "news", "time_range": "day"} -> allow; {"topic": "finance"} -> block
+    """
+    try:
+        args = json.loads(serialized_call).get("args", {})
+    except (AttributeError, TypeError, json.JSONDecodeError):
+        args = None
+    if not isinstance(args, dict):
+        return HookResult("block", "web-search-filters", "search arguments are malformed")
+    if args.get("topic", "general") not in TOPICS:
+        return HookResult("block", "web-search-filters", f"topic must be one of {', '.join(TOPICS)}")
+    if args.get("time_range") not in (None, *TIME_RANGES):
+        return HookResult("block", "web-search-filters", f"time_range must be one of {', '.join(TIME_RANGES)}")
+    return HookResult("allow", None, "search filters are valid")
 
 
 def within_web_search_budget(serialized_call: str) -> HookResult:

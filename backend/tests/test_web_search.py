@@ -9,11 +9,23 @@ and keeps the feature disabled when no API key is configured.
 import asyncio
 
 from simba.graph import build_graph
-from simba.harness.tool_hooks import MAX_WEB_SEARCH_CALLS_PER_TURN, MAX_WEB_SEARCH_QUERY_CHARS, allowlisted_tool_call
+import json
+from datetime import date
+
+from simba.harness.tool_hooks import (
+    MAX_WEB_SEARCH_CALLS_PER_TURN,
+    MAX_WEB_SEARCH_QUERY_CHARS,
+    TIME_RANGES,
+    TOPICS,
+    allowlisted_tool_call,
+    valid_web_search_filters,
+)
 from simba.model import FakeChatModel, fake_model
 from simba.nodes.hook_points import before_tool
 from simba.nodes.refuse import REFUSAL_TEXT
-from simba.tools.web_search import MAX_TOOL_RESULT_CHARS, make_web_search_tool
+from simba.harness.settings import BEFORE_TOOL
+from simba.nodes.agent import make_node, today_text
+from simba.tools.web_search import MAX_TOOL_RESULT_CHARS, make_tavily_client, make_web_search_tool
 from tests.test_api import parse_sse, running_app
 from tests.node_harness import run_node
 from langchain_core.messages import AIMessage, HumanMessage
@@ -25,10 +37,12 @@ class FakeSearchClient:
     def __init__(self, result: dict):
         self.result = result
         self.queries: list[str] = []
+        self.params: list[dict[str, str]] = []  # everything each search sent, filters included (#52)
 
     async def ainvoke(self, input: dict[str, str]) -> dict:
         """Record the query and return the configured search response without network access."""
         self.queries.append(input["query"])
+        self.params.append(input)
         return self.result
 
 
@@ -202,3 +216,79 @@ async def test_search_loop_ends_even_when_the_model_never_stops_asking():
     call_ids = {c["id"] for m in result["messages"] if m.type == "ai" for c in m.tool_calls}
     answered = {m.tool_call_id for m in result["messages"] if m.type == "tool"}
     assert call_ids == answered
+
+# ---- #52: fresher search — today's date, news topic and time range, queries in the trace ----
+
+
+async def search_once(tmp_path, args: dict, result: dict):
+    """Run one chat turn where the fake model searches once with `args`, against a fake Tavily that
+    returns `result`. Returns (fake client, fake model, trace lines) for the test to inspect."""
+    client = FakeSearchClient(result)
+    model = fake_model(reply="Answer.", structured={"web_search": args})
+    async with running_app(model=model, db_path=str(tmp_path / "s.db"), web_search_tool=make_web_search_tool(client)) as (_app, http):
+        events = parse_sse((await http.post("/api/chat", json={"message": "AI news today?", "chat_id": None})).text)
+    return client, model, [data for name, data in events if name == "trace"]
+
+
+async def test_news_filters_reach_tavily_and_show_in_the_trace(tmp_path):
+    """The model's topic and time_range are sent to Tavily, and the trace shows them with the query,
+    so the owner can see *what* was searched when an answer looks stale."""
+    args = {"query": "AI news", "topic": "news", "time_range": "day"}
+    client, _model, traces = await search_once(tmp_path, args, {"results": [{"url": "https://e.test"}]})
+
+    assert client.params == [args]
+    search_line = next(line for line in traces if line["stage"] == "web_search")
+    assert search_line["detail"] == '1 result(s) · news · day · "AI news"'
+
+
+async def test_no_time_range_means_none_is_sent(tmp_path):
+    """A timeless question sends no time_range at all: Tavily reads a missing one as "any time"."""
+    client, _model, _traces = await search_once(tmp_path, {"query": "what is LangGraph"}, {"results": []})
+    assert client.params == [{"query": "what is LangGraph", "topic": "general"}]
+
+
+async def test_published_dates_reach_the_model(tmp_path):
+    """News results carry a published date; the model must see it to tell today's story from last week's."""
+    result = {"results": [{"url": "https://e.test", "content": "x", "published_date": "Tue, 29 Sep 2026 08:00:00 GMT"}]}
+    _client, model, _traces = await search_once(tmp_path, {"query": "AI", "topic": "news", "time_range": "day"}, result)
+    tool_reply = next(message for message in model.calls[-1] if message.type == "tool")
+    assert "Tue, 29 Sep 2026 08:00:00 GMT" in tool_reply.content
+
+
+def test_filter_hook_allows_known_values_and_blocks_others():
+    """Only the listed topics and time ranges may reach Tavily; anything else is stopped in code."""
+    def check(args):
+        return valid_web_search_filters(json.dumps({"name": "web_search", "args": args})).action
+
+    assert check({"query": "q"}) == "allow"
+    assert check({"query": "q", "topic": "news", "time_range": "day"}) == "allow"
+    assert check({"query": "q", "topic": "finance"}) == "block"
+    assert check({"query": "q", "time_range": "hour"}) == "block"
+    assert valid_web_search_filters in BEFORE_TOOL  # and it actually runs before every search
+
+
+def test_tool_schema_offers_exactly_the_allowed_filters():
+    """The values Claude sees in the tool schema must match what the hook allows, or Claude would be
+    offered a value that then always gets blocked (or never offered one we allow)."""
+    tool = make_web_search_tool(FakeSearchClient({}))
+    props = tool.args
+    assert tuple(props["topic"]["enum"]) == TOPICS
+    time_range_values = [v for option in props["time_range"]["anyOf"] for v in option.get("enum", [])]
+    assert tuple(time_range_values) == TIME_RANGES
+
+
+def test_real_tavily_client_leaves_topic_and_time_range_to_each_call(monkeypatch):
+    """langchain-tavily lets a constructor value override the per-call one. If make_tavily_client set
+    topic="general", every "news" search would silently run as general — the bug this guards."""
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-test-not-a-real-key")  # constructing makes no request
+    client = make_tavily_client()
+    assert client.topic is None and client.time_range is None
+
+
+async def test_agent_prompt_includes_todays_date():
+    """Without the date Claude guessed the year from its training data and searched "AI news 2024"."""
+    model = fake_model()
+    await run_node(make_node(model), {"messages": [HumanMessage("hi")], "flag": None, "web_search_calls": 0})
+    system_text = model.calls[0][0].content
+    assert f"Today is {today_text()}." in system_text
+    assert str(date.today().year) in system_text
