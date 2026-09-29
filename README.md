@@ -4,7 +4,9 @@ A small, friendly AI assistant built as a **learning lab**. Every message goes t
 pipeline — a code guard, an intent check, a reasoning step and the answer — and each step shows up
 live in a trace panel next to the chat.
 
-- Design book (what and why): [`docs/design.html`](docs/design.html) · [published version](https://claude.ai/artifact/Kh7t1hNsLvJdULwHgEtsSD)
+- Requirements (why, and what "working" means): [`docs/requirements.md`](docs/requirements.md)
+- Design book (how): [`docs/design.html`](docs/design.html) · [published version](https://claude.ai/artifact/Kh7t1hNsLvJdULwHgEtsSD)
+- Decisions (which, and why): [`docs/decisions/README.md`](docs/decisions/README.md)
 - Interfaces (exactly how the pieces fit): [`docs/contracts.md`](docs/contracts.md)
 
 ## How one message flows
@@ -55,9 +57,12 @@ cd frontend && npm install && npm run dev     # http://localhost:5173
 
 ```
 simba-agent/
-├── CLAUDE.md                 rules for AI coding sessions
-├── STATE.md                  current focus + where to look (read first by AI sessions)
+├── CLAUDE.md                 rules for AI coding sessions (backend/ and frontend/ have their own, loaded on demand)
+├── STATE.md                  current focus + where to look (imported by CLAUDE.md)
+├── .claude/                  shared Claude Code setup: settings.json, rules/, skills/ (/ticket, /pr-review)
+├── docs/requirements.md      why Simba exists, acceptance criteria
 ├── docs/design.html          design book
+├── docs/decisions/           decision log (D1…)
 ├── docs/contracts.md         interfaces between the parts
 ├── .github/workflows/ci.yml  tests on every pull request
 ├── data/simba.db             your chats (git-ignored; created on first run)
