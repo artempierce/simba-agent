@@ -12,10 +12,11 @@ next node by name — read that result and choose the path:
                            +- blocked -> refuse    +- web_search -> tools -> agent (loop)
                                                   +- report_unsafe -> refuse -> END
 
-    before_model  hooks (harness/settings.py's before_model_hooks): size, injection regex,   nodes/hook_points.py
-                                local classifier — code + one local model call, $0 (#32, was "guard")
-    agent         LLM: answers, calls report_unsafe, or requests web_search (#17, #33)       nodes/agent.py
-    tools         runs allowlisted web_search between before/after hooks (#17)                langgraph ToolNode
+  before_model  hooks (harness/settings.py's before_model_hooks): size, injection regex,   nodes/hook_points.py
+                local classifier — code + one local model call, $0 (#32, was "guard")
+  agent         LLM: answers, calls report_unsafe, or requests web_search (#17, #33)       nodes/agent.py
+  before_tool   hooks (settings.py's BEFORE_TOOL): allowlist, query, per-turn budget (#17)  nodes/hook_points.py
+  tools         runs allowlisted web_search; its after_tool hooks run inside it (#17)       langgraph ToolNode
   after_model   hooks (harness/settings.py's AFTER_MODEL): checks on the finished reply;    nodes/hook_points.py
                 retracts leaks, $0 (#15, #32, was "output_guard")
   refuse        fixed reply, no model, $0                                                    nodes/refuse.py
@@ -34,6 +35,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
 from simba.harness.classifier import InjectionClassifier
+from simba.harness.tool_hooks import MAX_WEB_SEARCH_CALLS_PER_TURN
 from simba.nodes import agent as agent_node
 from simba.nodes.hook_points import after_model, before_tool, make_before_model
 from simba.nodes.refuse import refuse
@@ -57,8 +59,23 @@ def after_agent(state: ChatState) -> str:
 
 
 def after_before_tool(state: ChatState) -> str:
-    """Route a rejected call back to the agent; dispatch only calls that passed validation."""
-    return "agent" if state["tool_call_blocked"] else "tools"
+    """Routing function for the edge after `before_tool`: "tools" for calls that passed validation,
+    "agent" for a rejected call (the model reads the denial and tries something else), or "refuse"
+    once a rejected call has also run past the turn's search budget.
+
+    Why the third route: the budget hook only blocks the *search*. Sending that denial back to the
+    agent would let a model that keeps asking loop forever, one paid model call per round. The agent
+    stops offering the tool once the budget is spent (nodes/agent.py), so only a misbehaving model
+    lands here — and its turn ends with the fixed refusal. Hard limit in code, not a prompt.
+
+    Example (budget 3): searches 1-3 run -> the agent answers with no tool bound. If it requests a
+    4th anyway, before_tool denies it, `web_search_calls` becomes 4 > 3 -> "refuse".
+    """
+    if not state["tool_call_blocked"]:
+        return "tools"
+    if state["web_search_calls"] > MAX_WEB_SEARCH_CALLS_PER_TURN:
+        return "refuse"
+    return "agent"
 
 
 def build_graph(
@@ -82,15 +99,17 @@ def build_graph(
 
     Returns: a compiled graph, ready for `.astream(...)` / `.ainvoke(...)`.
 
-     Steps:
-        1. Register the nodes by name. `agent` is built by its `make_node(model, tools)` factory;
-            `before_model` is built by its own `make_before_model(classifier)` factory (#8, #32).
+    Steps:
+      1. Register the nodes by name. `agent` is built by its `make_node(model, tools)` factory;
+         `before_model` by its own `make_before_model(classifier)` factory (#8, #32). The tool
+         nodes exist only when a search tool is configured.
       2. START always goes to `before_model`.
       3. After `before_model`, `after_before_model` picks `agent` or `refuse` (a conditional edge).
-        4. After `agent`, `after_agent` picks `after_model`, `refuse`, or the optional tool node.
-        5. `before_tool` validates requested calls before `ToolNode` can execute them.
-        6. A completed tool result loops back to `agent`; only plain text goes to after_model.
-        7. Both `after_model` and `refuse` end the turn (refuse's fixed text needs no checking).
+      4. After `agent`, `after_agent` picks `after_model`, `refuse`, or `before_tool`.
+      5. `before_tool` validates requested calls; `after_before_tool` picks `tools`, `agent`
+         (a denied call) or `refuse` (denied past the search budget).
+      6. A completed tool result loops back to `agent` — the ReAct loop.
+      7. Both `after_model` and `refuse` end the turn (refuse's fixed text needs no checking).
     """
     graph = StateGraph(ChatState)
     # 1. Nodes.
@@ -106,11 +125,13 @@ def build_graph(
     graph.add_edge(START, "before_model")
     # 3. The list names every node `after_before_model` may return, so LangGraph can draw and check the graph.
     graph.add_conditional_edges("before_model", after_before_model, ["agent", "refuse"])
-    # 4. The agent's own report_unsafe call gets the second say.
+    # 4. The agent answers, reports unsafe (second gate), or asks for a tool.
     destinations = ["after_model", "refuse"] + (["before_tool"] if tools else [])
     graph.add_conditional_edges("agent", after_agent, destinations)
     if tools:
-        graph.add_conditional_edges("before_tool", after_before_tool, ["agent", "tools"])
+        # 5. Validate before anything runs.
+        graph.add_conditional_edges("before_tool", after_before_tool, ["tools", "agent", "refuse"])
+        # 6. The tool's result goes back to the agent.
         graph.add_edge("tools", "agent")
     # 7. Both terminal paths end the turn.
     graph.add_edge("after_model", END)

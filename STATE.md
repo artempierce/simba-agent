@@ -9,7 +9,7 @@ Harness redesign done (design book 0.3): hooks listed in `harness/settings.py` r
 (#32); one `agent` node replaces intent/reason/generate (#33).
 
 ## Current focus
-Ticket #17: first read-only tool (Tavily web search), tool hooks, and the ReAct loop.
+None open — next items need the owner's input before they can be planned (see Next up).
 
 ## Next up (post-MVP)
 - #10 Personality prompts (needs owner, one `system.md` to tune)
@@ -17,6 +17,8 @@ Ticket #17: first read-only tool (Tavily web search), tool hooks, and the ReAct 
 - #12 Frontend tests (Vitest) · #16 Per-chat cost budget · #13 / #14 memory designs
 
 ## Recently done
+#17 Tavily `web_search` + ReAct loop (optional, needs `TAVILY_API_KEY`); the per-turn search budget
+ends the turn in code (follow-up to PR #44) · #42 no unsafe stream leaks, chat-delete race ·
 #33 one `agent` node replaces intent/reason/generate: `ReportUnsafe` tool, safety rules merged into
 `system.md` · #32 hooks in settings: `harness/` folder, hook runner, before_model/after_model nodes ·
 #35 Claude Code setup (rules by load time, requirements, decision log) · #11 design book 0.3 (harness
