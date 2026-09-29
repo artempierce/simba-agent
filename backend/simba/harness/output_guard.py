@@ -3,16 +3,17 @@ output_guard.py — checks on what Simba WRITES (ticket #15, #32), the mirror of
 what it reads. Pure functions: no LangGraph, no model, no cost.
 
 Where it runs: `settings.py`'s `AFTER_MODEL` list runs these three hooks (via `harness/hooks.py`) on
-the finished answer, right after the generate node. The answer has already streamed to the browser by
-then, so a hit can't be "blocked" in the input-guard sense — it's RETRACTED: `nodes/hook_points.py`'s
-`after_model` swaps the saved reply for RETRACT_TEXT and the API tells the page to swap the bubble too
-(policy chosen by Sol, 2026-09-27).
+the finished answer, right after the agent node (#33, was "generate"). The answer has already
+streamed to the browser by then, so a hit can't be "blocked" in the input-guard sense — it's
+RETRACTED: `nodes/hook_points.py`'s `after_model` swaps the saved reply for RETRACT_TEXT and the API
+tells the page to swap the bubble too (policy chosen by Sol, 2026-09-27).
 
 The three hooks, most serious first:
 
   1. no_secrets        — something that looks like an Anthropic API key, or the variable's name
-  2. no_internal_tags   — our own prompt delimiters (<user_message>, <intent>) showing up in an
-                          answer means prompt structure is leaking
+  2. no_internal_tags   — our own prompt delimiters (<user_message>, <intent>), from before #33's
+                          agent node dropped them, showing up in an answer would still mean leaked
+                          prompt structure
   3. no_prompt_leak     — the answer repeats a run of LEAK_WORDS consecutive words from one of our
                           prompt files: Simba is quoting its own instructions
 
@@ -31,7 +32,8 @@ RETRACT_TEXT = "I can't share that. Let's talk about something else."
 # The prompt files an answer must never quote. Read on every check (load() reads the file each time),
 # so an edited prompt is protected on the next message too. Loaded here, not passed in, so
 # `no_prompt_leak` has the same one-argument shape as every other hook (Hook = Callable[[str], HookResult]).
-PROMPT_NAMES = ("system", "intent", "reason")
+# #33 merged intent.md's rules into system.md and deleted reason.md — system.md is the only prompt left.
+PROMPT_NAMES = ("system",)
 
 # How many consecutive words an answer must share with a prompt file to count as a leak. 8 is long
 # enough that ordinary phrases ("in as few words as") don't trip it, short enough that quoting any
@@ -41,7 +43,8 @@ LEAK_WORDS = 8
 # Looks like an Anthropic key (they start "sk-ant-"), or names the environment variable holding it.
 SECRET = re.compile(r"sk-ant-[A-Za-z0-9_\-]{8,}|ANTHROPIC_API_KEY")
 
-# Our own delimiters (see nodes/intent.py and nodes/reason.py), opening or closing, any case/spacing.
+# Our own delimiters from before #33's agent node (it sends plain history, no wrapper tags), opening
+# or closing, any case/spacing. Kept as a guard against a leaked older-style prompt.
 INTERNAL_TAGS = re.compile(r"<\s*(?:/\s*)?(?:user_message|intent)\b", re.IGNORECASE)
 
 # A "word" for leak matching: letters, digits and apostrophes, lowercased — so punctuation, line

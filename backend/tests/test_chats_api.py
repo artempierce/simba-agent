@@ -1,6 +1,6 @@
 """
 tests/test_chats_api.py — the /api/chats router (simba/chats_api.py) end to end, against a tiny
-stand-in graph instead of Simba's real guard/intent/reason/generate graph.
+stand-in graph instead of Simba's real before_model/agent/after_model graph.
 
 The test app wires up exactly what the router reads off `request.app.state`: a ChatStore, an
 AsyncSqliteSaver checkpointer, and a one-node graph compiled with that checkpointer. That's enough to
@@ -58,7 +58,7 @@ async def _seed_thread(graph, chat_id: str) -> None:
     """Give a chat some checkpointed history by running the stand-in graph on its thread id, the same
     per-turn input shape api.py sends (docs/contracts.md § 4)."""
     await graph.ainvoke(
-        {"messages": [HumanMessage("hi")], "verdict": None, "intent": None, "decision": None},
+        {"messages": [HumanMessage("hi")], "verdict": None, "flag": None},
         {"configurable": {"thread_id": chat_id}},
     )
 

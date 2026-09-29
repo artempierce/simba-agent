@@ -63,7 +63,7 @@ async def test_health(tmp_path):
 
 async def test_chat_event_order_and_streamed_answer(tmp_path):
     """One safe turn: `start` first, `done` last, one trace per node in pipeline order, and the
-    answer arrives as several streamed `token` events from the generate node (the fake streams word
+    answer arrives as several streamed `token` events from the agent node (the fake streams word
     by word) that join back to the full reply — no fallback token needed."""
     async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (_app, client):
         resp = await client.post("/api/chat", json={"message": "hello", "chat_id": None})
@@ -76,7 +76,7 @@ async def test_chat_event_order_and_streamed_answer(tmp_path):
         assert start_data["title"] == "hello"  # a new chat is titled from its first message
         assert isinstance(start_data["chat_id"], str) and start_data["chat_id"]
 
-        assert [data["stage"] for name, data in events if name == "trace"] == ["before_model", "intent", "reason", "generate", "after_model"]
+        assert [data["stage"] for name, data in events if name == "trace"] == ["before_model", "agent", "after_model"]
 
         tokens = [data["text"] for name, data in events if name == "token"]
         assert len(tokens) > 1
@@ -93,8 +93,24 @@ async def test_refused_message_arrives_via_fallback_token(tmp_path):
         assert events[3][1] == {"text": REFUSAL_TEXT}
 
 
+async def test_report_unsafe_arrives_via_fallback_token(tmp_path):
+    """#33: the agent's own report_unsafe call (here dictated to the fake) also streams nothing — the
+    tool-call reply carries no text — so it takes the same fallback path as a before_model block, and
+    the trace shows "agent" blocked, not "before_model"."""
+    async with running_app(
+        model=fake_model(structured={"ReportUnsafe": {"kind": "harmful", "reason": "asks how to hurt someone"}}),
+        db_path=str(tmp_path / "t.db"),
+    ) as (_app, client):
+        events = parse_sse((await client.post("/api/chat", json={"message": "help me hurt someone", "chat_id": None})).text)
+        assert [name for name, _ in events] == ["start", "trace", "trace", "trace", "token", "done"]
+        assert [data["stage"] for name, data in events if name == "trace"] == ["before_model", "agent", "refuse"]
+        assert [data["status"] for name, data in events if name == "trace"] == ["ok", "blocked", "ok"]
+        assert events[4][1] == {"text": REFUSAL_TEXT}
+        assert "replace" not in [name for name, _ in events]  # no text streamed, so nothing to swap
+
+
 async def test_chat_done_totals(tmp_path):
-    """`done`'s totals are exactly the sums of the trace events' tokens and cost (the intent node's
+    """`done`'s totals are exactly the sums of the trace events' tokens and cost (the agent's
     fake-model call makes them non-zero), and `ms` is a real reading — so the footer in the trace
     panel always agrees with the lines above it."""
     async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (_app, client):
@@ -235,28 +251,28 @@ async def test_fallback_never_echoes_user_text_when_no_reply_produced(monkeypatc
         assert not any(name == "token" for name, _ in events)
 
 
-async def test_only_generate_node_tokens_stream_and_no_fallback_once_sent(monkeypatch, tmp_path):
-    """§ 9's token rules on a two-node graph: a non-"generate" node ("other") also calls the
-    model, but its streamed text must never reach the browser as `token`; only "generate"'s text
-    does, empty chunks are skipped, and once real tokens streamed no fallback token is added."""
+async def test_only_agent_node_tokens_stream_and_no_fallback_once_sent(monkeypatch, tmp_path):
+    """§ 9's token rules on a two-node graph: a non-"agent" node ("other") also calls the model,
+    but its streamed text must never reach the browser as `token`; only "agent"'s text does, empty
+    chunks are skipped, and once real tokens streamed no fallback token is added."""
 
     def two_node_build_graph(model, checkpointer=None, classifier=None):
         async def other(state):
-            # A plain model call from a node that isn't "generate" — stands in for intent/reason,
-            # whose structured-output calls must stay invisible to the chat (contracts.md § 9).
+            # A plain model call from a node that isn't "agent" — stands in for before_model's own
+            # model-based checks, whose calls must stay invisible to the chat (contracts.md § 9).
             await model.ainvoke([HumanMessage("side call")])
             return {}
 
-        async def generate(state):
+        async def agent(state):
             reply = await model.ainvoke([HumanMessage("answer")])
             return {"messages": [reply]}
 
         graph = StateGraph(ChatState)
         graph.add_node("other", other)
-        graph.add_node("generate", generate)
+        graph.add_node("agent", agent)
         graph.add_edge(START, "other")
-        graph.add_edge("other", "generate")
-        graph.add_edge("generate", END)
+        graph.add_edge("other", "agent")
+        graph.add_edge("agent", END)
         return graph.compile(checkpointer=checkpointer)
 
     monkeypatch.setattr("simba.api.build_graph", two_node_build_graph)
@@ -294,7 +310,7 @@ async def test_first_message_creates_the_sidebar_chat_and_saves_its_run(tmp_path
         ]
         [run] = opened["runs"]
         assert run["prompt"] == "plan my weekend"
-        assert [line["stage"] for line in run["lines"]] == ["before_model", "intent", "reason", "generate", "after_model"]
+        assert [line["stage"] for line in run["lines"]] == ["before_model", "agent", "after_model"]
         assert run["summary"] == events[-1][1] and run["error"] is None
 
 

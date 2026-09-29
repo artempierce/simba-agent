@@ -2,7 +2,7 @@
 
 Loaded only when a session works in `backend/`. Root rules still apply.
 
-- One test file: `uv run pytest tests/test_intent.py -q`; all: `uv run pytest -q --tb=short`.
+- One test file: `uv run pytest tests/test_agent.py -q`; all: `uv run pytest -q --tb=short`.
 - Tests always use the fake model (`simba.model.fake_model`); never real Claude.
   Async tests need no decorator (`asyncio_mode = "auto"`).
 - A graph step = `simba/nodes/<step>.py` + wiring in `graph.py` + field in `state.py` +
@@ -12,5 +12,5 @@ Loaded only when a session works in `backend/`. Root rules still apply.
 - Every node reports through `common.emit_trace`; a step missing from the trace panel isn't done.
 - API change → update `specs/api-spec.json` (`tests/test_api_spec.py` catches drift).
 - Harness redesign: #32 moved the guard, classifier and output guard into `simba/harness/` as hooks
-  (`hooks.py`, `settings.py`, `nodes/hook_points.py`). #33 (next) replaces intent/reason/generate with
-  one agent node.
+  (`hooks.py`, `settings.py`, `nodes/hook_points.py`). #33 replaced intent/reason/generate with one
+  `agent` node (`nodes/agent.py`, `bind_tools([ReportUnsafe])` as an optional tool).

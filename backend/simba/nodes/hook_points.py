@@ -2,13 +2,14 @@
 nodes/hook_points.py — the graph's hook-point nodes: before_model and after_model (#32, D22/D29),
 replacing nodes/guard.py and nodes/output_guard.py.
 
-Where it sits: START -> before_model (contracts.md § 8, was "guard") runs before intent or any model
-call; after generate, after_model (was "output_guard") checks the finished reply. Both nodes are thin
-LangGraph glue: they read the hook lists `harness/settings.py` decides, hand them to
-`harness.hooks.run_hooks`, and turn the results into what the rest of the graph reads —
-before_model's Verdict/flag (simba/state.py) keeps the same shape `nodes/guard.py` used to write, so
-`after_guard`/`after_intent` (graph.py) and `intent.py` (§ 7.4) don't change; after_model's retraction
-(an AIMessage replacing the answer by id) is exactly what the old output_guard node did.
+Where it sits: START -> before_model (contracts.md § 8, was "guard") runs before the agent node or
+any model call; after the agent node (#33, was "generate"), after_model (was "output_guard") checks
+the finished reply. Both nodes are thin LangGraph glue: they read the hook lists `harness/settings.py`
+decides, hand them to `harness.hooks.run_hooks`, and turn the results into what the rest of the graph
+reads — before_model's Verdict/flag (simba/state.py) keeps the same shape `nodes/guard.py` used to
+write, so `after_before_model`/`after_agent` (graph.py) and `nodes/agent.py` (§ 7.4) don't change;
+after_model's retraction (an AIMessage replacing the answer by id) is exactly what the old
+output_guard node did.
 """
 
 from langchain_core.messages import AIMessage, BaseMessage
@@ -43,10 +44,11 @@ def make_before_model(classifier: InjectionClassifier | None = None):
       2. Runs the hooks through `run_hooks("before_model", ...)` — one trace line for the whole
          point (D28/D29), stopping at the first block.
       3. A block -> Verdict "blocked" naming that hook's rule and reason (the same shape
-         `nodes/guard.py` wrote, so `refuse` and `intent` need no change).
+         `nodes/guard.py` wrote, so `refuse` and `agent` need no change).
       4. No block -> Verdict "pass". Any hooks that flagged (never block, D15) have their rules
          joined with "; " into `state["flag"]` — several hooks could flag at once, where the old
-         guard only ever had one (the classifier); `intent.py` reads whatever ends up there unchanged.
+         guard only ever had one (the classifier); `nodes/agent.py` reads whatever ends up there
+         unchanged.
     """
     hooks = before_model_hooks(classifier)
 
@@ -74,7 +76,7 @@ def make_before_model(classifier: InjectionClassifier | None = None):
 async def after_model(state: ChatState) -> dict:
     """Check the newest reply against `settings.AFTER_MODEL`; retract it if a hook blocks (#15, #32).
 
-    1. Take the reply generate just wrote (the newest message).
+    1. Take the reply the agent node just wrote (the newest message).
     2. Run the hooks through `run_hooks("after_model", ...)` — one trace line for the point.
     3. No block -> {} (no state change). A block -> RETRACT_TEXT under the SAME message id, so
        LangGraph's `add_messages` reducer replaces the answer in the saved history instead of

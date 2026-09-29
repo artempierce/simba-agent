@@ -12,7 +12,7 @@ layers have different jobs and different policies:
 Policy (Sol, 2026-09-27): a flagged message is still answered — a model score is a probability, not
 a fact, and refusing every borderline message would be too blunt. Instead `classifier_hook` flags
 (HookResult, never blocks) and `nodes/hook_points.py`'s `before_model` node writes it onto the state
-(state.py) so the intent node (§ 7.4) can weigh it while judging the message itself.
+(state.py) so the agent node (§ 7.4) can weigh it while judging the message itself.
 
 The model: protectai/deberta-v3-base-prompt-injection-v2 (Apache-2.0). We run its ONNX export with
 `onnxruntime` (a C++ engine that runs an already-trained neural network fast, without needing the
@@ -61,8 +61,8 @@ _TOKENIZER_FILE = "onnx/tokenizer.json"
 _CONFIG_FILE = "onnx/config.json"
 
 # P(injection) at or above this is treated as a flag. 0.9 rather than 0.5 because a false positive
-# here only adds a note the intent LLM can judge and dismiss — a cheap mistake — so the bar is set
-# high to keep ordinary messages from tripping it.
+# here only adds a note the agent can judge and dismiss — a cheap mistake — so the bar is set high
+# to keep ordinary messages from tripping it.
 THRESHOLD = 0.9
 
 # The model's whole context window, [CLS] and [SEP] included (its config.json:

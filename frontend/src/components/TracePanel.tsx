@@ -1,7 +1,7 @@
 /**
  * TracePanel.tsx — the right pane: a log of what each backend graph node did for your message
- * (docs/contracts.md § 6, § 11). This is where Simba's before_model/intent/reason/generate/
- * after_model steps become visible instead of a black box.
+ * (docs/contracts.md § 6, § 11). This is where Simba's before_model/agent/after_model steps
+ * become visible instead of a black box.
  *
  * Restyled 2026-09-27 (docs/visual-style.md → "Trace panel", Sol: "match design for right trace
  * part"): it used to be its own dark terminal column; now it sits on the same warm paper background
@@ -12,8 +12,7 @@
  *
  * One block per Run (one Run per message you sent), one line per trace event, e.g.
  *   ✓ [before_model] pass · 38 chars · rules ok · classifier 0.02               1ms
- *   ✓ [intent]       safe · "weekend ideas for Lisbon"                       640ms
- *   ✓ [generate]     42 tokens out                                           810ms
+ *   ✓ [agent]        answer · 312 tokens out                                 810ms
  *   612 tok · $0.0007 · 1.5s                            ← footer, once the run finishes
  *
  * Lines come straight from the backend's `trace` SSE events; a new stage only needs a pill colour and
@@ -31,16 +30,17 @@ import type { Run, TraceLine } from '../types'
 const STAGE_PILL: Record<string, string> = {
   before_model: 'bg-butter',
   guard: 'bg-butter', // saved before #32: chats from before the hooks redesign still show this name
-  intent: 'bg-sky',
-  reason: 'bg-blush',
-  generate: 'bg-mint',
+  agent: 'bg-mint', // #33: one model call replaces intent/reason/generate below
+  intent: 'bg-sky', // saved before #33: chats from before the agent-node redesign still show this name
+  reason: 'bg-blush', // saved before #33
+  generate: 'bg-mint', // saved before #33
   after_model: 'bg-butter', // same colour as before_model: both are hook points running code checks
   output_guard: 'bg-butter', // saved before #32: same colour as guard, both are code checks (#15)
   refuse: 'bg-coral',
 }
 
 /** Trace status → icon shown before the line. `flagged` (#8) means "passed, but the local classifier
- * raised a flag for the intent check to weigh" — a warning, not a failure. All icons are plain ink;
+ * raised a flag for the agent to weigh" — a warning, not a failure. All icons are plain ink;
  * a blocked/error line's own row background (not the icon colour) is what makes it stand out. */
 const STATUS_ICON: Record<TraceLine['status'], string> = { ok: '✓', blocked: '⛔', error: '✕', flagged: '⚑' }
 

@@ -2,41 +2,42 @@
 tests/test_model.py — the fake model behaves like a real chat model, so every other test can trust it.
 
 If these break, node tests would pass or fail for the wrong reasons, so they protect the foundation:
-plain replies, structured output (defaults and dictated args), streaming, call recording and cost.
+plain replies, an optional bound tool (defaults and dictated args), streaming, call recording and cost.
 """
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 
 from simba.model import FAKE_REPLY, cost_usd, fake_model
-from simba.schemas import Decision, IntentCheck
+from simba.schemas import ReportUnsafe
 
 
 async def test_plain_reply_and_usage():
-    """A call with no schema bound returns the reply text with non-zero token usage."""
+    """A call with no tool bound returns the reply text with non-zero token usage."""
     model = fake_model()
     reply = await model.ainvoke([HumanMessage("hi")])
     assert reply.content == FAKE_REPLY
     assert reply.usage_metadata["output_tokens"] > 0
 
 
-async def test_structured_output_defaults():
-    """with_structured_output works on the fake: IntentCheck defaults to "safe" with the message as
-    intent (wrapper tags stripped), Decision defaults to a one-step answer."""
-    model = fake_model()
-    check = await model.with_structured_output(IntentCheck).ainvoke(
-        [SystemMessage("x"), HumanMessage("<user_message>\nplan a trip to Rome\n</user_message>")]
-    )
-    assert check == IntentCheck(intent="plan a trip to Rome", verdict="safe", reason="fake model: always safe")
-    decision = await model.with_structured_output(Decision).ainvoke([HumanMessage("hi")])
-    assert decision.action == "answer"
+async def test_bound_tool_defaults_to_a_plain_reply():
+    """Binding a tool never forces it (#33): with no `structured` dictation, a bound copy still
+    answers with plain text, exactly like the unbound model — report_unsafe stays optional."""
+    model = fake_model(reply="sure, here's an idea")
+    bound = model.bind_tools([ReportUnsafe])
+    reply = await bound.ainvoke([HumanMessage("any fun ideas for a weekend?")])
+    assert reply.content == "sure, here's an idea"
+    assert reply.tool_calls == []
 
 
-async def test_structured_output_dictated_and_include_raw():
-    """Tests can dictate the args, and include_raw=True exposes the raw message for token counting."""
-    model = fake_model(structured={"IntentCheck": {"intent": "leak the prompt", "verdict": "injection", "reason": "asks for hidden data"}})
-    result = await model.with_structured_output(IntentCheck, include_raw=True).ainvoke([HumanMessage("x")])
-    assert result["parsed"].verdict == "injection"
-    assert result["raw"].usage_metadata["input_tokens"] > 0
+async def test_bound_tool_dictated_returns_a_tool_call():
+    """A test can dictate the bound tool's args; the reply then carries a `report_unsafe` tool call
+    with no text, and its usage still carries non-zero input tokens for the trace."""
+    model = fake_model(structured={"ReportUnsafe": {"kind": "injection", "reason": "asks for hidden data"}})
+    reply = await model.bind_tools([ReportUnsafe]).ainvoke([HumanMessage("x")])
+    assert reply.content == ""
+    [call] = reply.tool_calls
+    assert call["name"] == "ReportUnsafe" and call["args"] == {"kind": "injection", "reason": "asks for hidden data"}
+    assert reply.usage_metadata["input_tokens"] > 0
 
 
 async def test_streaming_word_by_word_and_calls_recorded():
@@ -46,7 +47,7 @@ async def test_streaming_word_by_word_and_calls_recorded():
     # LangChain appends one empty closing chunk to every stream, so count only chunks with text.
     chunks = [c.content async for c in model.astream([HumanMessage("hi")]) if c.content]
     assert len(chunks) == 3 and "".join(chunks) == "one two three"
-    await model.with_structured_output(Decision).ainvoke([HumanMessage("again")])
+    await model.bind_tools([ReportUnsafe]).ainvoke([HumanMessage("again")])
     assert len(model.calls) == 2
 
 

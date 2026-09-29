@@ -6,9 +6,10 @@ wants to change. LangGraph merges that dict into the state. For most fields "mer
 `messages` is special — its *reducer* (`add_messages`) appends new messages instead of replacing
 the whole list, so a node returns {"messages": [new_reply]} and the history is kept.
 
-Per-turn fields (verdict, intent, decision) describe the CURRENT message only. The checkpointer saves
-state between turns, so api.py resets them to None at the start of every turn — otherwise a node could
-read last turn's verdict by mistake.
+Per-turn fields (verdict, flag) describe the CURRENT message only. The checkpointer saves state
+between turns, so api.py resets them to None at the start of every turn — otherwise a node could
+read last turn's verdict by mistake. #33 removed `intent` and `decision`: the agent node now reasons
+about both inside its one model call instead of writing them to state for a later node to read.
 """
 
 from typing import Annotated, Literal, TypedDict
@@ -35,16 +36,11 @@ class ChatState(TypedDict):
     """Everything the graph knows about one chat (one LangGraph thread).
 
     messages  the conversation, oldest first; `add_messages` appends (see file header)
-    verdict   this turn's safety result (Verdict), or None before the guard runs
-    intent    this turn's request restated in one line by the intent node, or None
-    decision  this turn's Decision from the reason node, stored as a plain dict
-              {"action": "answer" | "clarify", "plan": [...]} so the checkpointer can save it
+    verdict   this turn's safety result (Verdict), or None before before_model runs
     flag      why the local classifier flagged this turn, e.g. "classifier 0.97" (#8); None = not
-              flagged. Set by before_model, read by the intent node (nodes/hook_points.py § 7.2).
+              flagged. Set by before_model, read by the agent node (nodes/hook_points.py § 7.2).
     """
 
     messages: Annotated[list[AnyMessage], add_messages]
     verdict: Verdict | None
-    intent: str | None
-    decision: dict | None
     flag: str | None
