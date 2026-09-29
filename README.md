@@ -1,7 +1,7 @@
 # Simba
 
 A small, friendly AI assistant built as a **learning lab**. Every message goes through a visible
-pipeline — a code guard, an intent check, a reasoning step and the answer — and each step shows up
+pipeline — a code guard, then one agent call that answers (or refuses) — and each step shows up
 live in a trace panel next to the chat.
 
 - Requirements (why, and what "working" means): [`docs/requirements.md`](docs/requirements.md)
@@ -13,19 +13,16 @@ live in a trace panel next to the chat.
 
 ```
 your message → before_model (hooks: size + regex + local classifier) ─┬─ blocked → refuse (fixed reply)
-                                                                      └─ pass (maybe ⚑ flagged) → intent (LLM: restate + safety verdict) ─┬─ unsafe → refuse
-                                                                                                                                         └─ safe → reason (LLM: action + plan) → generate (LLM: streamed answer) → after_model (hooks: retracts a leak)
+                                                                      └─ pass (maybe ⚑ flagged) → agent (LLM: one call that answers, or calls report_unsafe) ─┬─ answer → after_model (hooks: retracts a leak)
+                                                                                                                                                            └─ report_unsafe → refuse
 ```
 
 Each hook point (`before_model`, `after_model`; `before_tool`/`after_tool` come with #17) runs the
 checks `harness/settings.py` lists for it, cheapest first, and stops at the first block (#32).
 
-**Next** (design book 0.3, #33): intent + reason + generate become one `agent` node — one model call
-per turn; the hook points and their checks don't change.
-
 The before_model hooks have two layers: regex rules that **block**, then a small local model
 (`protectai/deberta-v3-base-prompt-injection-v2`, runs on your CPU, $0) that only **flags** (⚑). A flag
-never blocks on its own: it tells the intent check to look carefully, and the LLM makes the call.
+never blocks on its own: it tells the agent to look carefully, and the LLM makes the call.
 
 ## Build status
 
@@ -39,6 +36,7 @@ never blocks on its own: it tells the intent check to look carefully, and the LL
 | 5 | Generate, then real Claude + token counts (#9) and the output guard (#15) | done |
 | 6 | Chats sidebar: new, open, rename, delete | done |
 | — | Harness redesign: guard/output_guard become before_model/after_model hooks (#32) | done |
+| — | Harness redesign: intent + reason + generate become one `agent` node (#33) | done |
 | 7 | Personality tuning | planned |
 
 **Known gap:** the frontend has no automated tests yet (only lint + type-check + build in CI). The
@@ -82,12 +80,12 @@ simba-agent/
 │   │   ├── output_guard.py   after_model hooks: secrets, internal tags, prompt leaks
 │   │   ├── hooks.py          HookResult, Hook, and run_hooks (the hook runner)
 │   │   └── settings.py       which hooks run at each hook point, in which order
-│   ├── nodes/                one file per graph node: hook_points (before_model/after_model), intent, reason, generate, refuse
+│   ├── nodes/                one file per graph node: hook_points (before_model/after_model), agent, refuse
 │   ├── model.py              real Claude or the free fake model; cost per call
 │   ├── state.py              the graph's state
-│   ├── schemas.py            structured-output shapes (IntentCheck, Decision)
+│   ├── schemas.py            structured-output shape (ReportUnsafe)
 │   ├── common.py             shared helpers, including the trace-line writer
-│   └── prompts/              Simba's procedural memory: system.md, intent.md, reason.md
+│   └── prompts/              Simba's procedural memory: system.md (the only prompt)
 └── frontend/src/
     ├── App.tsx               the page and all its state
     ├── api.ts                streamChat: POST + a small SSE parser

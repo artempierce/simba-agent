@@ -33,14 +33,14 @@
         "tags": ["chat"],
         "operationId": "chat",
         "summary": "Send one message; stream the turn back as SSE",
-        "description": "Runs one turn of the graph (before_model → intent → reason → generate → after_model, or → refuse). `chat_id: null` starts a new chat titled from this message; a known id continues that chat and moves it to the top; an unknown id is refused with 404 before any streaming, so client text never becomes a database key. Each turn's run (prompt, trace lines, totals or error) is saved with the chat, even if the client disconnects mid-answer.",
+        "description": "Runs one turn of the graph (before_model → agent → after_model, or → refuse). `chat_id: null` starts a new chat titled from this message; a known id continues that chat and moves it to the top; an unknown id is refused with 404 before any streaming, so client text never becomes a database key. Each turn's run (prompt, trace lines, totals or error) is saved with the chat, even if the client disconnects mid-answer.",
         "requestBody": {
           "required": true,
           "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChatRequest" } } }
         },
         "responses": {
           "200": {
-            "description": "The turn as a stream of SSE blocks. Order: `start` (once, first) → `trace` (one per hook point/node) and `token` (answer text as it streams) → `replace` (only if after_model retracted the answer) → `done` (once, last). On an exception after `start`, `error` replaces `done` and ends the stream.",
+            "description": "The turn as a stream of SSE blocks. Order: `start` (once, first) → `trace` (one per hook point/node) and `token` (answer text as it streams) → `replace` (only if after_model retracted the answer, or the agent's own report_unsafe fired after already streaming text) → `done` (once, last). On an exception after `start`, `error` replaces `done` and ends the stream.",
             "x-sse-events": ["start", "trace", "token", "replace", "error", "done"],
             "content": {
               "text/event-stream": {
@@ -220,11 +220,11 @@
       "TraceStage": {
         "type": "string",
         "description": "Which graph node wrote the line (contracts.md § 6). `guard`/`output_guard` are saved before #32 (the hooks redesign); new turns write `before_model`/`after_model`.",
-        "enum": ["before_model", "intent", "reason", "generate", "after_model", "refuse", "guard", "output_guard"]
+        "enum": ["before_model", "agent", "after_model", "refuse", "intent", "reason", "generate", "guard", "output_guard"]
       },
       "TraceStatus": {
         "type": "string",
-        "description": "ok = passed; blocked = stopped or retracted; error = the node failed; flagged = passed, but the local classifier raised a flag (⚑) for the intent check to weigh.",
+        "description": "ok = passed; blocked = stopped or retracted; error = the node failed; flagged = passed, but the local classifier raised a flag (⚑) for the agent to weigh.",
         "enum": ["ok", "blocked", "error", "flagged"]
       },
       "TraceLine": {
@@ -285,7 +285,7 @@
       },
       "TokenEvent": {
         "type": "object",
-        "description": "A piece of the answer as it streams (only the generate node's text). A refusal, which calls no model, arrives as one token with the whole fixed reply.",
+        "description": "A piece of the answer as it streams (only the agent node's text). A refusal, which calls no model, arrives as one token with the whole fixed reply.",
         "required": ["event", "data"],
         "properties": {
           "event": { "const": "token" },
@@ -294,7 +294,7 @@
       },
       "ReplaceEvent": {
         "type": "object",
-        "description": "#15: the output guard retracted the answer after it streamed. The page replaces the whole reply with `text` (the saved history already holds only `text`).",
+        "description": "#15: the output guard retracted the answer after it streamed, or #33: the agent's own report_unsafe fired after it had already streamed some text. The page replaces the whole reply with `text`.",
         "required": ["event", "data"],
         "properties": {
           "event": { "const": "replace" },

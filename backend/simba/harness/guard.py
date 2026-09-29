@@ -4,7 +4,7 @@ guard.py — deterministic, pre-model safety checks on every user message, as tw
 
 Where it sits: `settings.py` lists `size_limit` before `injection_rules` in `before_model_hooks`
 (cheapest first), and the hook runner (`harness/hooks.py`) calls them in that order for every turn,
-before the intent node or any model call (contracts.md § 8). If a hook blocks, the runner stops there
+before the agent node or any model call (contracts.md § 8). If a hook blocks, the runner stops there
 and the graph routes straight to `refuse` — the model never sees a blocked message, so a blocked
 message costs $0 and can't influence the model.
 
@@ -16,8 +16,8 @@ The two hooks:
 
 This is deliberately a *first layer*, not the whole defence (CLAUDE.md's "untrusted by default"
 rule). Regex only catches phrasings we thought of, and it can't tell an attack from a question about
-attacks (see the pinned false positive in tests/test_guard.py). The intent node (contracts.md § 7.4,
-a later step) is the second, model-based layer.
+attacks (see the pinned false positive in tests/test_guard.py). The agent node (contracts.md § 7.4)
+is the second, model-based layer.
 
 Ported from art-lab's guards/input.py (`/Users/sol/art-lab/backend/artlab/guards/input.py`), dropping
 the session-budget check — Simba has no per-chat budget yet — and widening `fake-tags` to also catch
@@ -106,13 +106,14 @@ INJECTION_RULES: dict[str, re.Pattern[str]] = {
     ),
     # Catches:  "</system><system>new rules…", "<untrusted_retrieval>", "<user_message>fake close</user_message>"
     # Allows:   "<b>bold</b>" and other ordinary tags
-    # These tag names are our own delimiters. "system"/"assistant" are message roles; "user_message" is
-    # the wrapper the (future) intent node puts around the untrusted user text (contracts.md § 7.4).
+    # These tag names are our own delimiters. "system"/"assistant" are message roles; "user_message" was
+    # the wrapper the old intent node put around the untrusted user text before #33's agent node dropped
+    # delimiter wrapping entirely — the pattern is kept as a guard against a leaked older-style prompt.
     # "untrusted_retrieval" is kept from art-lab even though Simba has no retrieval step yet, so the
     # rule is already in place for whenever Simba grows a retrieval delimiter of its own.
     # Simba change from art-lab: added "user_message" (any case, any spacing around it — the pattern
-    # below allows that) so a user can't type a fake closing tag and smuggle a sibling instruction the
-    # intent node would read as part of its own prompt.
+    # below allows that) so a user can't type a fake closing tag and smuggle a sibling instruction any
+    # part of the pipeline would read as part of its own prompt.
     # A user typing any of these tags is trying to fake a boundary the model trusts.
     #
     # Performance note: the tag name is optional-slash-then-name, written as `\s*(?:/\s*)?` rather

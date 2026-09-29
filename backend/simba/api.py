@@ -26,7 +26,8 @@ blocks, each shaped like
 The browser reads them one at a time (frontend's streamChat, contracts.md § 11). Five event types
 exist, always in this order for one turn: `start` (once, first) -> any number of `trace` -> any
 number of `token` -> `done` (once, last) — or `error` instead of `done` if the graph raised. A sixth,
-`replace`, comes just before `done` only when the output guard retracted the answer (#15).
+`replace`, comes just before `done` when the output guard retracted the answer (#15), or when the
+agent's own `report_unsafe` call fires after it had already streamed some text (#33).
 """
 
 import json
@@ -50,6 +51,7 @@ from simba.graph import build_graph
 from simba.harness.classifier import InjectionClassifier, load_classifier
 from simba.harness.output_guard import RETRACT_TEXT
 from simba.model import cost_usd, make_model
+from simba.nodes.refuse import REFUSAL_TEXT
 
 # backend/.env holds SIMBA_FAKE_LLM / ANTHROPIC_API_KEY (git-ignored: the repo is public).
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -151,16 +153,22 @@ def create_app(
           2. Send `start` with the chat id and title. Sent first, before anything below can fail.
           3. Reset this turn's input exactly to contracts.md § 4's shape (history itself is kept
              by the checkpointer, keyed by chat_id) and run the graph, forwarding `custom`
-             chunks as `trace` and `messages` chunks as `token` (only the generate node's actual
-             answer text — other nodes' model calls are structured-output tool calls, not text
-             the user should see).
+             chunks as `trace` and `messages` chunks as `token` (only the agent node's actual
+             answer text — a `report_unsafe` call streams as tool-call chunks, not text the user
+             should see).
           4. If nothing became a `token` (e.g. the refuse node's fixed reply never goes through the
              model, so it never streams as a "messages" chunk), fall back to the newest message: if it's this
              turn's AI reply (`type == "ai"` — the human message went in first, so an AI message
              at the end can only be from this turn), send its full text as one `token`;
              otherwise no reply was actually produced, so send `error` rather than letting the
              user's own message come back disguised as an answer.
-             4b. If the output guard retracted the answer, send `replace` with the fixed reply.
+             4b. Swap the bubble for the fixed reply (`replace`) in either of two cases: the output
+                 guard retracted the answer, or the agent's `report_unsafe` fired *after* it had
+                 already streamed some text (a "late" report_unsafe) — that partial text is on the
+                 page with nothing to overwrite it, since a blocked reply is never saved under any
+                 message id (nodes/agent.py). The typical report_unsafe call writes nothing first,
+                 so it never streams a token and needs no `replace` — step 4's fallback already
+                 delivers refuse's fixed reply as a normal `token`.
           5. Send `done` with totals summed from the `trace` events. Steps 3-4 share one
              try/except so *any* exception after `start` — from the graph itself, or from step
              4's own state lookup — becomes an `error` event instead of the stream just stopping.
@@ -223,15 +231,14 @@ def create_app(
             turn_input = {
                 "messages": [HumanMessage(req.message)],
                 "verdict": None,
-                "intent": None,
-                "decision": None,
                 "flag": None,
             }
             tokens_in = tokens_out = 0
             token_sent = False
             retracted = False  # set when the output guard (#15) retracts this turn's answer
+            agent_unsafe = False  # set when the agent's report_unsafe call blocks this turn (#33)
             try:
-                # 3. Run the graph, forwarding trace lines and the generate node's answer text.
+                # 3. Run the graph, forwarding trace lines and the agent node's answer text.
                 async for mode, chunk in graph.astream(turn_input, config, stream_mode=["messages", "custom"]):
                     if mode == "custom":
                         tokens_in += chunk.get("input_tokens", 0)
@@ -239,10 +246,12 @@ def create_app(
                         lines.append(chunk)
                         if chunk.get("stage") == "after_model" and chunk.get("status") == "blocked":
                             retracted = True
+                        elif chunk.get("stage") == "agent" and chunk.get("status") == "blocked":
+                            agent_unsafe = True
                         yield sse("trace", chunk)
                     else:
                         message, metadata = chunk
-                        if metadata.get("langgraph_node") == "generate" and (text := text_of(message)):
+                        if metadata.get("langgraph_node") == "agent" and (text := text_of(message)):
                             token_sent = True
                             yield sse("token", {"text": text})
 
@@ -258,11 +267,16 @@ def create_app(
                         yield sse("error", {"message": "no reply was produced"})
                         return
 
-                # 4b. The output guard retracted the answer (#15). The page has already shown the
-                #     streamed text, so tell it to swap the bubble for the fixed reply. (The saved
-                #     history was already overwritten by the node itself.)
+                # 4b. Swap the bubble for the fixed reply: the output guard retracted the answer
+                #     (#15, the saved history was already overwritten by the node itself), or the
+                #     agent's report_unsafe fired after already streaming some text (#33) — that
+                #     text is on the page with nothing to overwrite it, since the blocked reply was
+                #     never saved. A typical report_unsafe (no leading text) needs no `replace`:
+                #     step 4's fallback already delivered refuse's fixed reply as a `token`.
                 if retracted:
                     yield sse("replace", {"text": RETRACT_TEXT})
+                elif agent_unsafe and token_sent:
+                    yield sse("replace", {"text": REFUSAL_TEXT})
             except Exception as exc:
                 message = f"{type(exc).__name__}: {exc}"
                 await save_run(None, message)

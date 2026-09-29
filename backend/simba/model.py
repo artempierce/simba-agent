@@ -2,30 +2,31 @@
 model.py — which chat model Simba talks to, a free fake one for tests, and what a call costs.
 
 Where it sits: graph.py calls `make_model()` once and hands the model to every node that needs one
-(intent, reason, generate). Nodes never import ChatAnthropic themselves, so swapping the real model
-for the fake one is a single switch here.
+(the agent node, #33). Nodes never import ChatAnthropic themselves, so swapping the real model for
+the fake one is a single switch here.
 
 Two models, one interface. Both are LangChain `BaseChatModel`s, so a node can't tell them apart:
 
   real  ChatAnthropic(claude-haiku-4-5)   costs money, needs ANTHROPIC_API_KEY
   fake  FakeChatModel                     costs $0, answers instantly, deterministic
 
-The fake is on when SIMBA_FAKE_LLM=1 (the whole test suite and CI use it). It also supports
-*structured output* — the trick the intent and reason nodes use to make the model fill fixed fields
-instead of writing free text. How that works, in LangChain:
+The fake is on when SIMBA_FAKE_LLM=1 (the whole test suite and CI use it). It also supports an
+*optional tool call* — the trick the agent node (nodes/agent.py) uses to let the model call
+`report_unsafe` instead of replying, without forcing it to on every turn. How that works, in LangChain:
 
-  model.with_structured_output(IntentCheck)
-      → calls model.bind_tools([IntentCheck], tool_choice="any")   the schema becomes a "tool"
-      → the model must reply with a tool call whose args match the schema
-      → a parser turns those args into an IntentCheck object
+  model.bind_tools([ReportUnsafe])
+      → the schema becomes a "tool" the model MAY call (unlike with_structured_output's
+        tool_choice="any", nothing forces it — a normal message just gets a normal text reply)
+      → a reply's `.tool_calls` list is empty for plain text, or has one entry naming the tool and
+        its args when the model chose to call it
 
-So the fake only needs `bind_tools` (remember which schema was asked for) and a reply that is a tool
-call with sensible args. Tests can dictate those args with `fake_model(structured={...})`.
+So the fake only needs `bind_tools` (remember which tool names were bound) and, by default, a plain
+text reply — the same as if no tool were bound at all. Tests dictate a tool call instead with
+`fake_model(structured={"ReportUnsafe": {...}})`.
 """
 
 import json
 import os
-import re
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -71,41 +72,19 @@ def cost_usd(input_tokens: int, output_tokens: int) -> float:
     return input_tokens * price_in / 1_000_000 + output_tokens * price_out / 1_000_000
 
 
-def _last_user_text(messages: list[BaseMessage]) -> str:
-    """The newest human message's text with any <user_message> wrapper tags removed.
-
-    The fake uses it to build a plausible `intent` line. Example:
-      [HumanMessage("<user_message>\\nhi there\\n</user_message>")] -> "hi there"
-    """
-    for m in reversed(messages):
-        if m.type == "human":
-            text = m.content if isinstance(m.content, str) else str(m.content)
-            return re.sub(r"</?user_message>", "", text).strip()
-    return ""
-
-
-def _default_args(schema_name: str, messages: list[BaseMessage]) -> dict[str, Any]:
-    """Args the fake returns for a structured-output call when a test didn't dictate them.
-
-    Chosen so the whole app runs end to end in fake mode: every message is "safe", and the plan is
-    always a one-step "answer". A schema the fake doesn't know is a programming error, so it raises.
-    """
-    if schema_name == "IntentCheck":
-        words = _last_user_text(messages).split()[:15]
-        return {"intent": " ".join(words) or "empty message", "verdict": "safe", "reason": "fake model: always safe"}
-    if schema_name == "Decision":
-        return {"action": "answer", "plan": ["answer briefly"]}
-    raise ValueError(f"FakeChatModel has no default args for {schema_name!r}; pass fake_model(structured={{...}})")
-
-
 class FakeChatModel(BaseChatModel):
     """A free, deterministic stand-in for Claude.
 
     Fields:
-      reply       the text it answers with when no schema is bound (the generate node's call)
-      structured  schema name -> the args to return for that schema, e.g.
-                  {"IntentCheck": {"intent": "hack", "verdict": "injection", "reason": "asks to leak"}}
-      bound       the schema names bound by with_structured_output (set by bind_tools, not by you)
+      reply       the text it answers with by default, and whenever no bound tool is dictated
+                  (the agent node's normal, safe-message call)
+      structured  tool name -> the args to return when the model calls that tool instead of
+                  replying, e.g. {"ReportUnsafe": {"kind": "injection", "reason": "asks to leak"}}
+      bound       the tool names bound by `bind_tools` (set by bind_tools, not by you). A bound
+                  name with no entry in `structured` changes nothing — the fake still answers with
+                  `reply`, exactly as if no tool were bound: binding a tool only makes it *possible*
+                  for the model to call it, never forces it (unlike with_structured_output's old
+                  tool_choice="any").
       calls       every prompt it was sent, oldest first — tests read this to check what a node sent,
                   or that a node made no call at all. Shared between copies made by bind_tools, so the
                   original fake sees calls made through its bound copies too.
@@ -121,23 +100,25 @@ class FakeChatModel(BaseChatModel):
         return "simba-fake"
 
     def bind_tools(self, tools: list, *, tool_choice: Any = None, **kwargs: Any) -> "FakeChatModel":
-        """Remember which schemas were bound. Returns a copy (LangChain's convention: binding never
-        changes the original model). `model_copy` is shallow, so `calls` stays the same list."""
+        """Remember which tool names were bound. Returns a copy (LangChain's convention: binding
+        never changes the original model). `model_copy` is shallow, so `calls` stays the same list."""
         names = [convert_to_openai_tool(t)["function"]["name"] for t in tools]
         return self.model_copy(update={"bound": names})
 
     def _answer(self, messages: list[BaseMessage]) -> tuple[str, dict[str, Any] | None, dict[str, int]]:
         """Decide the reply: (text, tool_call or None, usage). Records the prompt in `calls`.
 
-        Token counts are a rough estimate (4 characters ≈ 1 token) so the trace shows non-zero numbers.
+        A bound tool only fires when a test dictated its args in `structured` — the first such bound
+        name wins; otherwise this is a plain answer, same as if no tool were bound (see the class
+        docstring). Token counts are a rough estimate (4 characters ≈ 1 token) so the trace shows
+        non-zero numbers.
         """
         self.calls.append(list(messages))
         tokens_in = max(1, sum(len(str(m.content)) for m in messages) // 4)
-        if self.bound:
-            name = self.bound[0]
-            args = self.structured.get(name) or _default_args(name, messages)
+        name = next((n for n in self.bound if n in self.structured), None)
+        if name is not None:
             usage = {"input_tokens": tokens_in, "output_tokens": 20, "total_tokens": tokens_in + 20}
-            return "", {"name": name, "args": args, "id": "fake-call-1"}, usage
+            return "", {"name": name, "args": self.structured[name], "id": "fake-call-1"}, usage
         tokens_out = max(1, len(self.reply) // 4)
         return self.reply, None, {"input_tokens": tokens_in, "output_tokens": tokens_out, "total_tokens": tokens_in + tokens_out}
 
@@ -175,6 +156,6 @@ def fake_model(reply: str = FAKE_REPLY, structured: dict[str, dict[str, Any]] | 
     """Build a FakeChatModel for a test.
 
     Example:
-      model = fake_model(structured={"IntentCheck": {"intent": "x", "verdict": "injection", "reason": "y"}})
+      model = fake_model(structured={"ReportUnsafe": {"kind": "injection", "reason": "y"}})
     """
     return FakeChatModel(reply=reply, structured=structured or {})

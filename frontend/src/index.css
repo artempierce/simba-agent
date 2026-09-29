@@ -35,7 +35,7 @@
   --color-butter: #f1de99;
   --color-blush: #efd0df;
   --color-coral: #edb6a3;
-  --color-mint: #cde8d4; /* the trace panel's "generate" stage pill only */
+  --color-mint: #cde8d4; /* the trace panel's "agent" stage pill (was "generate") */
 }
 
 html,

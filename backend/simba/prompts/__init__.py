@@ -1,11 +1,10 @@
 """
-prompts — Simba's procedural memory: plain-text instructions, one file per job.
+prompts — Simba's procedural memory: plain-text instructions.
 
-  system.md   who Simba is and how it talks — used by the generate node
-  intent.md   how to restate and safety-check a message — used by the intent node
-  reason.md   how to choose an action and plan — used by the reason node
+  system.md   who Simba is, how it talks, and its safety rules — the only prompt, used by the
+              agent node (#33 merged intent.md's safety rules into it and deleted reason.md)
 
-They are Markdown files, not Python strings, so you can tune Simba without touching code. `load()`
+It is a Markdown file, not a Python string, so you can tune Simba without touching code. `load()`
 reads the file on every call, so an edit takes effect on the next message without restarting.
 """
 

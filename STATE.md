@@ -5,25 +5,28 @@ truth; this file only points to them. Update it in the same PR that closes a tic
 
 ## Milestone
 MVP done: guard → intent → reason → generate → output guard, on real Claude or the fake model.
-Now: harness redesign (design book 0.3, approved 2026-09-28): hooks listed in `harness/settings.py`
-run at hook points; one `agent` node replaces intent/reason/generate.
+Harness redesign done (design book 0.3): hooks listed in `harness/settings.py` run at hook points
+(#32); one `agent` node replaces intent/reason/generate (#33).
 
 ## Current focus
-- #33 H3 One agent node (after #32; replaces intent/reason/generate, hook points don't change)
+None open — next items need the owner's input before they can be planned (see Next up).
 
 ## Next up (post-MVP)
-- #10 Personality prompts (needs owner; after #33, one `system.md`)
+- #10 Personality prompts (needs owner, one `system.md` to tune)
 - #17 First tool + ReAct loop, before/after_tool hooks (settings.py's empty lists) → then #30 self-improvement (propose → approve → install)
 - #12 Frontend tests (Vitest) · #16 Per-chat cost budget · #13 / #14 memory designs
 
 ## Recently done
-#32 hooks in settings: `harness/` folder, hook runner, before_model/after_model nodes · #35 Claude Code setup (rules by load time, requirements, decision log) · #11 design book 0.3 (harness redesign) · #9 real Claude + token counts in trace · #15 output guard · #24 OpenAPI spec · #20/#21 redesign + avatar · #8 guard classifier
+#33 one `agent` node replaces intent/reason/generate: `ReportUnsafe` tool, safety rules merged into
+`system.md` · #32 hooks in settings: `harness/` folder, hook runner, before_model/after_model nodes ·
+#35 Claude Code setup (rules by load time, requirements, decision log) · #11 design book 0.3 (harness
+redesign) · #9 real Claude + token counts in trace · #15 output guard
 
 ## Where to look
 | Task | Files |
 |---|---|
 | Change a graph step | `backend/simba/nodes/<step>.py`, wiring in `graph.py`, fields in `state.py`, `docs/contracts.md` |
-| Prompts / personality | `backend/simba/prompts/*.md` |
+| Prompts / personality | `backend/simba/prompts/system.md` (the only prompt) |
 | Hook points (before/after_model) | `harness/settings.py` (which hooks run), `harness/hooks.py` (the runner), `nodes/hook_points.py` (graph glue) |
 | Input checks | `harness/guard.py` (rules), `harness/classifier.py` (local model) |
 | Output checks | `harness/output_guard.py` |
