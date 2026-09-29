@@ -18,7 +18,7 @@ run at hook points; one `agent` node replaces intent/reason/generate.
 - #12 Frontend tests (Vitest) · #16 Per-chat cost budget · #13 / #14 memory designs
 
 ## Recently done
-#35 Claude Code setup (`/ticket`, `/pr-review`, requirements, decision log) · #11 design book 0.3 (harness redesign) · #9 real Claude + token counts in trace · #15 output guard · #24 OpenAPI spec · #20/#21 redesign + avatar · #8 guard classifier
+#35 Claude Code setup (rules by load time, requirements, decision log) · #11 design book 0.3 (harness redesign) · #9 real Claude + token counts in trace · #15 output guard · #24 OpenAPI spec · #20/#21 redesign + avatar · #8 guard classifier
 
 ## Where to look
 | Task | Files |

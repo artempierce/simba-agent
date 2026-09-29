@@ -35,7 +35,7 @@ and are recorded here first; the design book catches up at its next sync.
 | D24 | No separate LLM safety check: the classifier's flag becomes a note in the agent's prompt, and report_unsafe is the model's structured "no" | accepted | Sol, 28 Sep |
 | D25 | LangGraph stays the engine for tools, owner approval and subagents | accepted | Sol, 28 Sep |
 | D26 | Harness files live in a simba/harness/ folder: settings.py, hooks.py, guard.py, classifier.py, output_guard.py | accepted | Sol, 28 Sep (Q12) |
-| D27 | Claude Code setup: rules split by load time (root, `backend/`, `frontend/`, path rule); tickets planned on Opus, built with `/ticket` on Sonnet, reviewed with `/pr-review` on Opus | accepted | Sol, 28 Sep, #35 |
+| D27 | Claude Code setup: rules split by load time (root, `backend/`, `frontend/`, path rule); tickets planned on Opus, built with the global `/ticket` skill on Sonnet, reviewed with the global `/pr-review` on Opus | accepted | Sol, 28 Sep, #35 |
 
 ## Template for a decision file
 

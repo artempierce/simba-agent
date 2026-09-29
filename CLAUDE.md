@@ -34,15 +34,16 @@ cd frontend && npm run dev                        # http://localhost:5173
 
 ## Workflow
 
-1. **Plan** (normal session, Opus): "plan #n" → read the issue, `STATE.md` and only the files it
-   touches → post the plan as an issue comment (goal, files, steps each with a check, out of scope,
-   done-when) → wait for the owner's OK. Skip for a change you can describe in one sentence.
-2. **Build:** `/clear`, then `/ticket <n>` (Sonnet) — fresh worktree, build, verify, `STATE.md`, PR.
-3. **Review:** `/pr-review <pr>` (Opus) — two passes, fix or waive findings, merge on green CI, tear down.
+The owner's global ticket workflow applies: plan on Opus as an issue comment → `/clear` →
+`/ticket <n>` (Sonnet builds to a PR) → `/pr-review <pr>` (Opus reviews, merges, tears down).
+Both skills live in `~/.claude/skills/`; this file adds what's specific to Simba.
 
 Every change starts from a GitHub issue (labels: `mvp`, `post-mvp`, `needs-owner`, `design`, `chore`).
 One ticket, one worktree, one PR into `main` — never into another feature branch (PR #27).
-No subagents unless the owner asks. Short replies, no filler.
+
+**Review focus for Simba** (on top of `/pr-review`'s two passes): fits the design book and
+`docs/contracts.md`; self-improvement limits and the security rule hold; learning-first readability
+ranks first — code that works but a learner can't follow is not done.
 
 ## Self-improvement rules (Simba changing itself)
 
