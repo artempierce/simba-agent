@@ -1,0 +1,288 @@
+# Web-search eval cases (#54): does Simba search when it should, with a good query, and answer from
+# fresh, real sources?
+#
+# Each case:
+#   id             short stable key (results and traces are saved under it)
+#   group          today | week | timeless | tricky — the report groups by this
+#   question       exactly what the user types; one message, a brand-new chat
+#   should_search  true when a good answer needs the web, false when searching would be wasted
+#   freshness      day | week | none — how recent the search results must be (checked in code
+#                  against each result's published date); none = no freshness check
+#   rubric         the judge's checklist for this case: concrete claims, each graded pass/fail
+#
+# Sources: t01, t02 and the "tools" question are the owner's own messages from 2026-09-29; the rest
+# are variations written to cover the four groups. Keep questions stable: changing one makes old
+# and new runs incomparable.
+
+# ---- today: needs the web, results from today or yesterday ----
+
+- id: t01
+  group: today
+  question: find in internet 3 last news about AI
+  should_search: true
+  freshness: day
+  rubric:
+    - Gives three separate AI news items.
+    - Every item is from today or yesterday, going by the dates in the search results.
+    - Every item has a source link.
+
+- id: t02
+  group: today
+  question: Search 3 top AI latest news, response as a list
+  should_search: true
+  freshness: day
+  rubric:
+    - The answer is a list of three AI news items.
+    - Every item is from today or yesterday, going by the dates in the search results.
+    - Every item has a source link.
+
+- id: t03
+  group: today
+  question: What's the weather in London right now?
+  should_search: true
+  freshness: day
+  rubric:
+    - Gives current conditions for London (temperature or sky), not a climate description.
+    - Says where the information comes from, or that it may be approximate.
+
+- id: t04
+  group: today
+  question: What happened in the stock market today?
+  should_search: true
+  freshness: day
+  rubric:
+    - Describes today's market movement (an index level or a direction with a number).
+    - The facts come from the search results, with a source link.
+
+- id: t05
+  group: today
+  question: Any big tech announcements today?
+  should_search: true
+  freshness: day
+  rubric:
+    - Names at least one tech announcement from today or yesterday.
+    - Every announcement has a source link.
+    - Does not present older news as today's.
+
+- id: t06
+  group: today
+  question: Did anything major happen in world news today?
+  should_search: true
+  freshness: day
+  rubric:
+    - Names at least one world news event from today or yesterday.
+    - Every event has a source link.
+
+- id: t07
+  group: today
+  question: What's the Bitcoin price now?
+  should_search: true
+  freshness: day
+  rubric:
+    - Gives a Bitcoin price in a currency.
+    - Says the price comes from a source and may have moved since.
+
+- id: t08
+  group: today
+  question: Who won yesterday's Premier League matches?
+  should_search: true
+  freshness: day
+  rubric:
+    - Gives results for Premier League matches played yesterday, or says clearly that none were played.
+    - Results come from the search results, with a source link.
+
+- id: t09
+  group: today
+  question: What are people saying about OpenAI today?
+  should_search: true
+  freshness: day
+  rubric:
+    - Summarises recent OpenAI news or discussion from today or yesterday.
+    - Has at least one source link.
+
+- id: t10
+  group: today
+  question: Is there any breaking news about Anthropic?
+  should_search: true
+  freshness: day
+  rubric:
+    - Reports recent Anthropic news, or says honestly that nothing new was found.
+    - Any news it reports has a source link.
+
+# ---- week: needs the web, results from the last seven days ----
+
+- id: w01
+  group: week
+  question: What were the biggest AI stories this week?
+  should_search: true
+  freshness: week
+  rubric:
+    - Names at least two AI stories from the last seven days.
+    - Every story has a source link.
+
+- id: w02
+  group: week
+  question: Any new iPhone news this week?
+  should_search: true
+  freshness: week
+  rubric:
+    - Reports iPhone news from the last seven days, or says honestly that nothing new was found.
+    - Any news it reports has a source link.
+
+- id: w03
+  group: week
+  question: Summarize this week's space news
+  should_search: true
+  freshness: week
+  rubric:
+    - Names at least two space news items from the last seven days.
+    - Every item has a source link.
+
+- id: w04
+  group: week
+  question: What new open-source LLMs came out recently?
+  should_search: true
+  freshness: week
+  rubric:
+    - Names at least one open-source language model released recently, going by the search results.
+    - Does not present a model from previous years as new.
+    - Has at least one source link.
+
+- id: w05
+  group: week
+  question: What's the latest on the EU AI Act?
+  should_search: true
+  freshness: week
+  rubric:
+    - Describes a recent development, not only what the Act is.
+    - Has at least one source link.
+
+# ---- timeless: the model already knows; a search wastes time and money ----
+
+- id: n01
+  group: timeless
+  question: Hey
+  should_search: false
+  freshness: none
+  rubric:
+    - Replies with a short, friendly greeting.
+
+- id: n02
+  group: timeless
+  question: What is recursion? Explain with a small example
+  should_search: false
+  freshness: none
+  rubric:
+    - Explains recursion as a function calling itself, with a base case.
+    - Includes a small correct example.
+
+- id: n03
+  group: timeless
+  question: Write a haiku about cats
+  should_search: false
+  freshness: none
+  rubric:
+    - Writes a short three-line poem about cats.
+
+- id: n04
+  group: timeless
+  question: What's the capital of Australia?
+  should_search: false
+  freshness: none
+  rubric:
+    - Says Canberra.
+
+- id: n05
+  group: timeless
+  question: How do I reverse a list in Python?
+  should_search: false
+  freshness: none
+  rubric:
+    - Shows a correct way, such as my_list.reverse() or my_list[::-1].
+
+- id: n06
+  group: timeless
+  question: Translate "good morning" into Spanish
+  should_search: false
+  freshness: none
+  rubric:
+    - Says "buenos días".
+
+- id: n07
+  group: timeless
+  question: What's 17% of 240?
+  should_search: false
+  freshness: none
+  rubric:
+    - Says 40.8.
+
+- id: n08
+  group: timeless
+  question: Give me 3 tips for a job interview
+  should_search: false
+  freshness: none
+  rubric:
+    - Gives three practical, distinct tips.
+
+- id: n09
+  group: timeless
+  question: What's up, what tools do you have?
+  should_search: false
+  freshness: none
+  rubric:
+    - Mentions web search as a tool it can use.
+    - Does not claim tools it doesn't have (such as email, files or code running).
+
+- id: n10
+  group: timeless
+  question: Why is the sky blue?
+  should_search: false
+  freshness: none
+  rubric:
+    - Explains that air scatters blue light more than red (Rayleigh scattering), in plain words.
+
+# ---- tricky: the right choice needs a moment of thought ----
+
+- id: x01
+  group: tricky
+  question: What's the latest Python version?
+  should_search: true
+  freshness: none
+  rubric:
+    - Gives a specific Python version number taken from the search results.
+    - Does not give a version from its own memory as if it were current.
+
+- id: x02
+  group: tricky
+  question: Who is the current CEO of OpenAI?
+  should_search: true
+  freshness: none
+  rubric:
+    - Names a person, based on the search results.
+    - Has at least one source link.
+
+- id: x03
+  group: tricky
+  question: What day of the week is it today?
+  should_search: false
+  freshness: none
+  rubric:
+    - Gives today's weekday and date correctly (the judge is told today's date).
+
+- id: x04
+  group: tricky
+  question: How many years ago was the Eiffel Tower finished?
+  should_search: false
+  freshness: none
+  rubric:
+    - Says it was finished in 1889.
+    - Works out the number of years from 1889 to the current year correctly.
+
+- id: x05
+  group: tricky
+  question: Is it a good idea to learn Rust in 2026?
+  should_search: false
+  freshness: none
+  rubric:
+    - Gives a balanced opinion with at least two reasons.
+    - Does not state made-up statistics or rankings as facts.
