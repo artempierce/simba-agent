@@ -27,6 +27,7 @@ from langchain_core.messages import SystemMessage
 from langchain_core.tools import BaseTool
 
 from simba.common import emit_trace, recent, tokens_used
+from simba.harness.tool_hooks import MAX_WEB_SEARCH_CALLS_PER_TURN
 from simba.prompts import load
 from simba.schemas import ReportUnsafe
 from simba.state import ChatState
@@ -46,7 +47,8 @@ def make_node(model: BaseChatModel, tools: Sequence[BaseTool] = ()):
       1. Builds the system prompt: system.md, plus a note if before_model's hooks flagged this
          message (`state["flag"]`, #8) — our own words and the flag string only, never user text,
          so the note itself can't be hijacked by anything the user wrote.
-      2. Sends it with the last HISTORY_LIMIT messages, `report_unsafe` and configured tools bound.
+      2. Sends it with the last HISTORY_LIMIT messages, `report_unsafe` and configured tools bound —
+         the tools only while this turn's search budget lasts (MAX_WEB_SEARCH_CALLS_PER_TURN).
          LangGraph routes tool-call messages to the tool node; ordinary text goes to after_model.
       3. Reads the reply: a `report_unsafe` call writes a blocked verdict ("agent-injection" or
          "agent-harmful") naming the model's own reason, and is NOT appended to `messages` — the
@@ -70,8 +72,12 @@ def make_node(model: BaseChatModel, tools: Sequence[BaseTool] = ()):
         prompt = [SystemMessage(system_text), *recent(state["messages"], HISTORY_LIMIT)]
 
         # 2. Bind the unsafe-report control and only the configured read-only tools. Binding is
-        #    optional: ordinary messages can still receive normal text replies.
-        reply = await model.bind_tools([ReportUnsafe, *tools]).ainvoke(prompt)
+        #    optional: ordinary messages can still receive normal text replies. Once this turn's
+        #    search budget is spent, the tools are no longer offered, so the model has to answer
+        #    with what it found (graph.py's after_before_tool ends the turn if it asks anyway).
+        budget_left = state["web_search_calls"] < MAX_WEB_SEARCH_CALLS_PER_TURN
+        offered = [ReportUnsafe, *tools] if budget_left else [ReportUnsafe]
+        reply = await model.bind_tools(offered).ainvoke(prompt)
         tokens = tokens_used(reply)
 
         # 3. A report_unsafe call is this turn's safety verdict; anything else is the answer.

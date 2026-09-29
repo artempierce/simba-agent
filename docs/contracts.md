@@ -210,7 +210,9 @@ include_answer=False, include_raw_content=False)`. Tests inject a fake client an
   never reaches `ToolNode`; a mixed valid/invalid batch is rejected atomically with one ToolMessage
   returned per call id.
 - `MAX_WEB_SEARCH_CALLS_PER_TURN = 3` bounds provider usage per user turn; attempts, including
-  rejected calls, count toward the limit.
+  rejected calls, count toward the limit. Once it is reached the agent binds only `ReportUnsafe`,
+  and a call requested anyway is denied and routed to `refuse`, so one turn makes at most
+  `MAX_WEB_SEARCH_CALLS_PER_TURN + 1` agent model calls.
 - Search output is capped at `MAX_TOOL_RESULT_CHARS = 8000`. `after_tool` flags known injection
   phrasing; if a hook itself fails, the result is withheld (fail closed).
 - Results are wrapped in `<untrusted_tool_result>` after escaping any matching fake boundary tags.
@@ -220,7 +222,7 @@ include_answer=False, include_raw_content=False)`. Tests inject a fake client an
 
 ## § 8 Graph (`simba/graph.py`)
 
-`build_graph(model: BaseChatModel, checkpointer=None, classifier: InjectionClassifier | None = None) -> CompiledStateGraph`
+`build_graph(model: BaseChatModel, checkpointer=None, classifier: InjectionClassifier | None = None, web_search_tool: BaseTool | None = None) -> CompiledStateGraph`
 — `before_model` is built with `hook_points.make_before_model(classifier)` (#8, #32).
 
 Final shape (#17, #33):
@@ -232,7 +234,9 @@ START → before_model ─┬─ pass ─→ agent ─┬─ text reply ─→ a
 ```
 (`output_guard` renamed `after_model` by #32; refuse's fixed text is not checked.)
 Routing functions `after_before_model(state) -> "agent" | "refuse"` and
-`after_agent(state) -> "after_model" | "refuse" | "before_tool"` reads the verdict and latest AI tool calls. `before_tool` routes to `tools` only after validation passes. Steps 1–4 used a
+`after_agent(state) -> "after_model" | "refuse" | "before_tool"` reads the verdict and latest AI tool calls.
+`after_before_tool(state) -> "tools" | "agent" | "refuse"`: `tools` only after validation passes;
+a denied call goes back to `agent`, or to `refuse` once `web_search_calls > MAX_WEB_SEARCH_CALLS_PER_TURN`. Steps 1–4 used a
 placeholder `echo` node (replied `"You said: {text}"`); step 5 replaced it with `generate`; #32
 renamed `guard`/`output_guard` to `before_model`/`after_model` and moved their logic behind hooks;
 #33 merged `intent`/`reason`/`generate` into the single `agent` node above.

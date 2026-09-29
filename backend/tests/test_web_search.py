@@ -6,13 +6,17 @@ agent to search and back, records both tool hook points in the trace, fences ext
 and keeps the feature disabled when no API key is configured.
 """
 
-from simba.harness.tool_hooks import MAX_WEB_SEARCH_QUERY_CHARS, allowlisted_tool_call
-from simba.model import fake_model
+import asyncio
+
+from simba.graph import build_graph
+from simba.harness.tool_hooks import MAX_WEB_SEARCH_CALLS_PER_TURN, MAX_WEB_SEARCH_QUERY_CHARS, allowlisted_tool_call
+from simba.model import FakeChatModel, fake_model
 from simba.nodes.hook_points import before_tool
+from simba.nodes.refuse import REFUSAL_TEXT
 from simba.tools.web_search import MAX_TOOL_RESULT_CHARS, make_web_search_tool
 from tests.test_api import parse_sse, running_app
 from tests.node_harness import run_node
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 
 
 class FakeSearchClient:
@@ -158,3 +162,43 @@ async def test_after_tool_hook_failure_withholds_external_text(monkeypatch, tmp_
     assert external_text not in tool_reply.content
     after_tool = next(data for name, data in events if name == "trace" and data["stage"] == "after_tool")
     assert after_tool["status"] == "blocked"
+
+
+class AlwaysSearchModel(FakeChatModel):
+    """A misbehaving model that asks for web_search on every call, whatever tools it was given.
+
+    `bound_per_call` records which tool names each call had bound, so the test can see the agent
+    take web_search away once the turn's search budget is spent."""
+
+    bound_per_call: list[list[str]] = []
+
+    def _answer(self, messages):
+        self.calls.append(list(messages))
+        self.bound_per_call.append(list(self.bound))
+        call = {"name": "web_search", "args": {"query": "again"}, "id": f"call-{len(self.calls)}"}
+        return "", call, {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+
+
+async def test_search_loop_ends_even_when_the_model_never_stops_asking():
+    """The per-turn search budget must end the TURN, not just block the search.
+
+    Before this fix a denied search went back to the agent, which could ask again forever — every
+    round a paid model call (1,543 calls in 20 s with this fake). Now: after MAX_WEB_SEARCH_CALLS_PER_TURN
+    searches the agent no longer binds web_search, and a model that asks anyway gets one denial and
+    the turn ends at refuse. A hard limit in code, not a prompt (CLAUDE.md's security rule)."""
+    client = FakeSearchClient({"results": [{"url": "https://example.test", "content": "fact"}]})
+    model = AlwaysSearchModel(reply="", structured={}, bound_per_call=[])
+    graph = build_graph(model, web_search_tool=make_web_search_tool(client))
+    turn = {"messages": [HumanMessage("news?")], "verdict": None, "flag": None, "tool_call_blocked": None, "web_search_calls": 0}
+
+    result = await asyncio.wait_for(graph.ainvoke(turn), timeout=5)  # the old code never returned
+
+    assert len(client.queries) == MAX_WEB_SEARCH_CALLS_PER_TURN  # the budget's searches, no more
+    assert len(model.calls) == MAX_WEB_SEARCH_CALLS_PER_TURN + 1  # one last call, with no search tool
+    assert "web_search" in model.bound_per_call[0]
+    assert model.bound_per_call[-1] == ["ReportUnsafe"]
+    assert result["messages"][-1].content == REFUSAL_TEXT
+    # Every tool call in the saved history got its answer, so the next turn is a valid conversation.
+    call_ids = {c["id"] for m in result["messages"] if m.type == "ai" for c in m.tool_calls}
+    answered = {m.tool_call_id for m in result["messages"] if m.type == "tool"}
+    assert call_ids == answered
