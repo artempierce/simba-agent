@@ -168,6 +168,24 @@ class ChatStore:
             for prompt, lines, summary, error in rows
         ]
 
+    async def spent_usd(self, chat_id: str) -> float:
+        """What a chat has spent so far: the sum of `cost_usd` over every trace line of every run (#16).
+
+        Why trace lines and not each run's summary: a turn that failed or was interrupted has no
+        summary, but the model calls it made before failing still cost money, and their trace lines
+        were saved. Library concept: SQLite's `json_each` turns a JSON array into rows (one per trace
+        line) and `json_extract` reads one key out of each, so the sum runs inside the database.
+
+        Example: two runs whose lines cost 0.001 and 0.002 + 0.0005 -> 0.0035
+        """
+        cursor = await self._db.execute(
+            """SELECT COALESCE(SUM(json_extract(line.value, '$.cost_usd')), 0)
+               FROM runs, json_each(runs.lines) AS line WHERE runs.chat_id = ?""",
+            (chat_id,),
+        )
+        (total,) = await cursor.fetchone()
+        return float(total)
+
     async def close(self) -> None:
         """Close the underlying database connection (mirrors AsyncSqliteSaver's lifecycle in api.py)."""
         await self._db.close()

@@ -29,9 +29,10 @@ Login, deployment, multiple users, tools before #17, subagents.
 | Chat UI with streamed answers; chats sidebar (new, open, rename, delete) | First tool + tool loop (#17) |
 | Trace panel showing every step | Self-growth: propose → approve → install (#30) |
 | Hooks listed in `harness/settings.py`, run at hook points (#32) | Subagents |
-| Input hooks: size, injection rules, local classifier (flags only) | Per-chat cost budget (#16) |
+| Input hooks: size, injection rules, local classifier (flags only) | |
 | Output hooks: secrets, internal tags, prompt leaks (retract) | Episodic and semantic memory (#13, #14) |
 | One agent call with a structured `report_unsafe` signal (#33) | |
+| Per-chat cost budget, $0.50 (#16) | |
 | Procedural + short-term memory; fake model; public repo with CI | |
 
 ## Acceptance criteria
@@ -51,6 +52,8 @@ Each line should map to at least one test.
   footer with tokens and cost.
 - **Given** an unknown chat id, **then** the API returns 404; **given** a browser disconnect mid-run,
   **then** the run's trace is still saved.
+- **Given** a chat that has already spent $0.50 (sum of its trace costs), **when** a message is sent,
+  **then** it's refused with a clear message and a `budget` trace line, and no model call is made.
 - **Given** a new chat, **then** its title is the first message cut to 40 characters, and it can be
   renamed and deleted.
 

@@ -14,9 +14,10 @@ None open — next items need the owner's input before they can be planned (see 
 ## Next up (post-MVP)
 - #10 Personality prompts (needs owner, one `system.md` to tune)
 - #30 Self-improvement (propose → approve → install), after the tool and approval design is ready
-- #16 Per-chat cost budget · #39 subagents (needs owner answers) · #13 / #14 memory designs
+- #39 subagents (needs owner answers) · #13 / #14 memory designs
 
 ## Recently done
+#16 per-chat cost budget: $0.50 (`harness/settings.py`), checked in `api.py` before the graph ·
 #12 frontend tests: Vitest for the SSE parser and App's stale-response guards, run in CI ·
 #17 Tavily `web_search` + ReAct loop (optional, needs `TAVILY_API_KEY`); the per-turn search budget
 ends the turn in code (follow-up to PR #44) · #42 no unsafe stream leaks, chat-delete race ·
@@ -34,7 +35,7 @@ redesign) · #9 real Claude + token counts in trace · #15 output guard
 | Web search | `backend/simba/tools/web_search.py` (Tavily, requires optional `TAVILY_API_KEY`) |
 | Input checks | `harness/guard.py` (rules), `harness/classifier.py` (local model) |
 | Output checks | `harness/output_guard.py` |
-| Model, cost, tokens | `model.py` |
+| Model, cost, tokens | `model.py`; per-chat budget in `harness/settings.py` + `api.py` step 2b |
 | HTTP API / SSE | `api.py`, `chats_api.py`, `specs/api-spec.json` (checked by `tests/test_api_spec.py`) |
 | Chat storage | `chats.py` (SQLite in `data/`) |
 | Frontend | `App.tsx` (state), `api.ts` (SSE parser), `components/TracePanel.tsx`, `ChatView.tsx`; style in `docs/visual-style.md` |
