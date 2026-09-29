@@ -13,7 +13,13 @@ from simba.nodes.refuse import REFUSAL_TEXT
 
 def turn(text: str) -> dict:
     """One turn's graph input (contracts.md § 4): the new message plus reset per-turn fields."""
-    return {"messages": [HumanMessage(text)], "verdict": None, "flag": None}
+    return {
+        "messages": [HumanMessage(text)],
+        "verdict": None,
+        "flag": None,
+        "tool_call_blocked": None,
+        "web_search_calls": 0,
+    }
 
 
 async def stages(graph, text: str) -> list[str]:

@@ -1,0 +1,1 @@
+"""Read-only tools Simba may call; graph.py binds only the capabilities configured here."""

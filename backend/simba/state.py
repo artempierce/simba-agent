@@ -40,8 +40,14 @@ class ChatState(TypedDict):
     verdict   this turn's safety result (Verdict), or None before before_model runs
     flag      why the local classifier flagged this turn, e.g. "classifier 0.97" (#8); None = not
               flagged. Set by before_model, read by the agent node (nodes/hook_points.py § 7.2).
+    tool_call_blocked whether `before_tool` rejected the latest model tool request; None before a
+              tool call, then reset on the next request. Used to route rejected calls around ToolNode.
+    web_search_calls number of search requests attempted during this turn; reset at each user turn
+              and capped so one model loop cannot spend the search allowance indefinitely.
     """
 
     messages: Annotated[list[AnyMessage], add_messages]
     verdict: Verdict | None
     flag: str | None
+    tool_call_blocked: bool | None
+    web_search_calls: int

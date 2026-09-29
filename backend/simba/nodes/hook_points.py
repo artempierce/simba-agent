@@ -13,14 +13,15 @@ output_guard node did.
 """
 
 from collections.abc import Sequence
+import json
 
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 
 from simba.common import text_of
 from simba.harness.classifier import InjectionClassifier
 from simba.harness.hooks import run_hooks
 from simba.harness.output_guard import RETRACT_TEXT
-from simba.harness.settings import AFTER_MODEL, before_model_hooks
+from simba.harness.settings import AFTER_MODEL, BEFORE_TOOL, before_model_hooks
 from simba.state import ChatState
 
 
@@ -92,3 +93,45 @@ async def after_model(state: ChatState) -> dict:
     if not any(r.action == "block" for r in results):
         return {}
     return {"messages": [AIMessage(RETRACT_TEXT, id=answer.id)]}
+
+
+async def before_tool(state: ChatState) -> dict:
+    """Validate model-requested calls before ToolNode is allowed to dispatch them.
+
+    An invalid or unknown call gets a ToolMessage explaining the denial and a state flag that routes
+    straight back to the agent, never through ToolNode. Valid calls are left untouched for dispatch.
+    """
+    assistant_message = state["messages"][-1]
+    calls_used = state["web_search_calls"]
+    rejected: dict[str, str] = {}
+    for index, call in enumerate(assistant_message.tool_calls):
+        payload = json.dumps({"name": call["name"], "args": call["args"], "calls_used": calls_used + index})
+        hook_results = await run_hooks("before_tool", BEFORE_TOOL, payload)
+        blocked = next((result for result in hook_results if result.action == "block"), None)
+        if blocked is not None:
+            rejected[call["id"]] = blocked.reason
+
+    if rejected:
+        # Reject the whole batch and answer every call id, so valid siblings aren't left without
+        # a ToolMessage when one unsafe sibling prevents dispatch.
+        tool_messages = [
+            ToolMessage(
+                content=(
+                    f"Tool request denied: {rejected[call['id']]}"
+                    if call["id"] in rejected
+                    else "Tool request not run because another call in this batch failed validation."
+                ),
+                tool_call_id=call["id"],
+                name=call["name"],
+            )
+            for call in assistant_message.tool_calls
+        ]
+        return {
+            "tool_call_blocked": True,
+            "web_search_calls": calls_used + len(assistant_message.tool_calls),
+            "messages": tool_messages,
+        }
+    return {
+        "tool_call_blocked": False,
+        "web_search_calls": calls_used + len(assistant_message.tool_calls),
+    }

@@ -41,6 +41,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
+from langchain_core.tools import BaseTool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import BaseModel
 
@@ -51,6 +52,7 @@ from simba.graph import build_graph
 from simba.harness.classifier import InjectionClassifier, load_classifier
 from simba.harness.output_guard import RETRACT_TEXT
 from simba.model import cost_usd, make_model
+from simba.tools.web_search import make_web_search_tool
 
 # backend/.env holds SIMBA_FAKE_LLM / ANTHROPIC_API_KEY (git-ignored: the repo is public).
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -81,6 +83,7 @@ def create_app(
     db_path: str | None = None,
     classifier: InjectionClassifier | None = None,
     load_real_classifier: bool = False,
+    web_search_tool: BaseTool | None = None,
 ) -> FastAPI:
     """Build the FastAPI app.
 
@@ -98,6 +101,8 @@ def create_app(
                     build the real ~740 MB ONNX model: doing that at import time would mean every
                     test that merely imports `create_app` pays for it too, and a corrupt model file
                     would break the import instead of just server start-up.
+                web_search_tool: an optional search tool override for tests or alternate providers. When not
+                        passed, a Tavily tool is built only if `TAVILY_API_KEY` is configured.
 
     Loads backend/.env (python-dotenv) so SIMBA_FAKE_LLM / ANTHROPIC_API_KEY are set before
     `make_model()` reads them. Building the model here is safe at import time: constructing
@@ -109,6 +114,9 @@ def create_app(
     """
     load_dotenv(BACKEND_DIR / ".env")
     chat_model = model or make_model()
+    resolved_web_search_tool = (
+        web_search_tool if web_search_tool is not None else make_web_search_tool()
+    )
     resolved_db_path = Path(db_path) if db_path is not None else DEFAULT_DB_PATH
 
     @asynccontextmanager
@@ -128,7 +136,8 @@ def create_app(
                 resolved_classifier = load_classifier() if load_real_classifier else classifier
                 app.state.checkpointer = checkpointer
                 app.state.chats = chats
-                app.state.graph = build_graph(chat_model, checkpointer, resolved_classifier)
+                graph_options = {"web_search_tool": resolved_web_search_tool} if resolved_web_search_tool else {}
+                app.state.graph = build_graph(chat_model, checkpointer, resolved_classifier, **graph_options)
                 yield
             finally:
                 await chats.close()
@@ -227,6 +236,8 @@ def create_app(
                 "messages": [HumanMessage(req.message)],
                 "verdict": None,
                 "flag": None,
+                "tool_call_blocked": None,
+                "web_search_calls": 0,
             }
             tokens_in = tokens_out = 0
             token_sent = False
@@ -241,6 +252,10 @@ def create_app(
                         tokens_in += chunk.get("input_tokens", 0)
                         tokens_out += chunk.get("output_tokens", 0)
                         lines.append(chunk)
+                        if chunk.get("stage") == "before_tool":
+                            # Text emitted before a tool request isn't the final answer checked by
+                            # after_model; discard it before the next agent iteration.
+                            answer_chunks.clear()
                         if chunk.get("stage") == "after_model" and chunk.get("status") == "blocked":
                             retracted = True
                         elif chunk.get("stage") == "agent" and chunk.get("status") == "blocked":

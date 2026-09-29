@@ -219,8 +219,8 @@
       },
       "TraceStage": {
         "type": "string",
-        "description": "Which graph node wrote the line (contracts.md § 6). `guard`/`output_guard` are saved before #32 (the hooks redesign); new turns write `before_model`/`after_model`.",
-        "enum": ["before_model", "agent", "after_model", "refuse", "intent", "reason", "generate", "guard", "output_guard"]
+        "description": "Which graph node or tool hook wrote the line (contracts.md § 6). `guard`/`output_guard` are saved before #32 (the hooks redesign); new tool turns may also write `before_tool`, `web_search`, and `after_tool`.",
+        "enum": ["before_model", "agent", "before_tool", "web_search", "after_tool", "after_model", "refuse", "intent", "reason", "generate", "guard", "output_guard"]
       },
       "TraceStatus": {
         "type": "string",

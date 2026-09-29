@@ -2,13 +2,14 @@
 simba/nodes/agent.py — the agent node: one model call replaces intent, reason and generate (#33, D21).
 
 Where it sits: before_model -> agent -+- text reply -> after_model
+                                       +- web_search -> tools -> agent (repeat)
                                        +- report_unsafe -> refuse
 (graph.py). By the time this node runs, the message has already passed before_model's code checks
 (size, injection regex, the local classifier's flag). The agent is the second, model-based layer: it
 reads the system prompt (system.md, which now carries the old intent.md's safety rules) plus the
 recent conversation, with `report_unsafe` (schemas.ReportUnsafe) bound as an optional tool — see
-`bind_tools` in LangChain. Binding never forces the call, so an ordinary message just gets an
-ordinary text reply; only a message the model judges unsafe gets a `report_unsafe` call instead.
+`bind_tools` in LangChain. Binding never forces a call: the agent can answer, request web search, or
+call `report_unsafe` when the message is unsafe.
 
 Key idea: no more <user_message>/<intent> delimiter dance. The old intent node saw only the newest
 message, so a planted instruction couldn't ride along on a later, unrelated turn; the agent needs
@@ -19,9 +20,11 @@ those, never the only one.
 """
 
 import time
+from collections.abc import Sequence
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
+from langchain_core.tools import BaseTool
 
 from simba.common import emit_trace, recent, tokens_used
 from simba.prompts import load
@@ -36,23 +39,22 @@ HISTORY_LIMIT = 20
 MAX_DETAIL_CHARS = 80
 
 
-def make_node(model: BaseChatModel):
-    """Build the agent node bound to `model` (docs/contracts.md § 7.4).
+def make_node(model: BaseChatModel, tools: Sequence[BaseTool] = ()):
+    """Build the agent node with its optional read-only tools (docs/contracts.md § 7.4).
 
     Returns an async node function `agent(state) -> dict` that:
       1. Builds the system prompt: system.md, plus a note if before_model's hooks flagged this
          message (`state["flag"]`, #8) — our own words and the flag string only, never user text,
          so the note itself can't be hijacked by anything the user wrote.
-      2. Sends it with the last HISTORY_LIMIT messages, `report_unsafe` bound as an optional tool.
-         LangGraph streams the reply's text tokens to the browser as they arrive (api.py forwards
-         them for this node only).
+      2. Sends it with the last HISTORY_LIMIT messages, `report_unsafe` and configured tools bound.
+         LangGraph routes tool-call messages to the tool node; ordinary text goes to after_model.
       3. Reads the reply: a `report_unsafe` call writes a blocked verdict ("agent-injection" or
          "agent-harmful") naming the model's own reason, and is NOT appended to `messages` — the
          graph routes straight to refuse instead. A plain text reply is appended as usual, ready for
          after_model to check next.
 
-    Why a factory: LangGraph nodes take only `state`, but this node needs a model. graph.py builds
-    it once per model with `make_node(model)` (model.py: nodes never create models themselves).
+    Why a factory: LangGraph nodes take only `state`, but this node needs a model and its configured
+    tools. graph.py binds those once when it builds the graph.
     """
 
     async def agent(state: ChatState) -> dict:
@@ -67,10 +69,9 @@ def make_node(model: BaseChatModel):
             )
         prompt = [SystemMessage(system_text), *recent(state["messages"], HISTORY_LIMIT)]
 
-        # 2. report_unsafe is bound but never forced (unlike the deleted intent/reason nodes'
-        #    with_structured_output(..., tool_choice="any")): an ordinary message just gets an
-        #    ordinary text reply.
-        reply = await model.bind_tools([ReportUnsafe]).ainvoke(prompt)
+        # 2. Bind the unsafe-report control and only the configured read-only tools. Binding is
+        #    optional: ordinary messages can still receive normal text replies.
+        reply = await model.bind_tools([ReportUnsafe, *tools]).ainvoke(prompt)
         tokens = tokens_used(reply)
 
         # 3. A report_unsafe call is this turn's safety verdict; anything else is the answer.
@@ -82,7 +83,11 @@ def make_node(model: BaseChatModel):
             emit_trace("agent", "blocked", detail, start, tokens)
             return {"verdict": {"status": "blocked", "rule": rule, "reason": parsed.reason}}
 
-        detail = f"answer · {tokens[1]} tokens out"
+        detail = (
+            f"tool call · {reply.tool_calls[0]['name']}"
+            if reply.tool_calls
+            else f"answer · {tokens[1]} tokens out"
+        )[:MAX_DETAIL_CHARS]
         emit_trace("agent", "ok", detail, start, tokens)
         return {"messages": [reply]}
 
