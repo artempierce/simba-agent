@@ -7,7 +7,7 @@
 
 /** One line in the trace panel: what one graph node did (backend: common.emit_trace). */
 export type TraceLine = {
-  stage: string // before_model | agent | after_model | refuse (intent | reason | generate on older chats)
+  stage: string // before_model | agent | after_model | refuse | budget (intent | reason | generate on older chats)
   // (guard/output_guard on chats saved before #32; echo in step 1)
   status: 'ok' | 'blocked' | 'error' | 'flagged' // flagged (#8): passed, but the classifier raised a flag
   detail: string

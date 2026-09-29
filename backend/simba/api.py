@@ -51,6 +51,7 @@ from simba.common import ms_since, text_of
 from simba.graph import build_graph
 from simba.harness.classifier import InjectionClassifier, load_classifier
 from simba.harness.output_guard import RETRACT_TEXT
+from simba.harness.settings import CHAT_BUDGET_USD
 from simba.model import cost_usd, make_model
 from simba.tools.web_search import make_web_search_tool
 
@@ -159,6 +160,9 @@ def create_app(
              message (`title_from`); a known chat_id → bump its `updated_at` so it moves to the top;
              an unknown chat_id (e.g. deleted in another tab) → 404, before any streaming starts.
           2. Send `start` with the chat id and title. Sent first, before anything below can fail.
+             2b. Budget (#16): if this chat has already spent CHAT_BUDGET_USD, don't run the graph at
+                 all — send one `budget` trace line and an `error` asking for a new chat, save the
+                 run, and stop. Checked in code before any model call, so it can't be talked past.
           3. Reset this turn's input exactly to contracts.md § 4's shape (history itself is kept
              by the checkpointer, keyed by chat_id) and run the graph, forwarding `custom`
              chunks as `trace` and `messages` chunks as `token` (only the agent node's actual
@@ -231,6 +235,26 @@ def create_app(
             started = time.perf_counter()
             # 2. Send `start` first, always, before anything below can fail.
             yield sse("start", {"chat_id": chat_id, "title": chat["title"]})
+
+            # 2b. Refuse the turn if the chat is out of budget. The trace line is built here, not
+            #     with common.emit_trace, because no graph node is running to stream it.
+            spent = await chats.spent_usd(chat_id)
+            if spent >= CHAT_BUDGET_USD:
+                message = f"This chat reached its ${CHAT_BUDGET_USD:.2f} budget. Please start a new chat."
+                line = {
+                    "stage": "budget",
+                    "status": "blocked",
+                    "detail": f"spent ${spent:.4f} of ${CHAT_BUDGET_USD:.2f}",
+                    "ms": ms_since(started),
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cost_usd": 0.0,
+                }
+                lines.append(line)
+                yield sse("trace", line)
+                await save_run(None, message)
+                yield sse("error", {"message": message})
+                return
 
             turn_input = {
                 "messages": [HumanMessage(req.message)],

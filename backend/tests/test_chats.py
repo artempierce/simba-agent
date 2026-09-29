@@ -8,6 +8,8 @@ state and each one starts from an empty database.
 
 import asyncio
 
+import pytest
+
 from simba import chats as chats_module
 from simba.chats import ChatStore, title_from
 
@@ -137,4 +139,20 @@ async def test_add_run_and_runs_round_trip_oldest_first(tmp_path):
     assert runs[0]["error"] is None
     assert runs[1]["summary"] is None
     assert runs[1]["error"] == "boom"
+    await store.close()
+
+
+async def test_spent_usd_sums_every_trace_line_of_this_chat_only(tmp_path):
+    """#16's budget reads this total. It must count failed turns too (no summary, but their model
+    calls still cost money), ignore lines without a cost, and never mix in another chat's spending."""
+    store = await ChatStore.open(str(tmp_path / "t.db"))
+    chat = await store.create("chat")
+    other = await store.create("other")
+    assert await store.spent_usd(chat["id"]) == 0.0  # no runs yet
+
+    await store.add_run(chat["id"], "ok turn", [{"cost_usd": 0.001}, {"cost_usd": 0.002}], {"ms": 1}, None)
+    await store.add_run(chat["id"], "failed turn", [{"cost_usd": 0.0005}, {"stage": "old line"}], None, "boom")
+    await store.add_run(other["id"], "other chat", [{"cost_usd": 9.0}], {"ms": 1}, None)
+
+    assert await store.spent_usd(chat["id"]) == pytest.approx(0.0035)
     await store.close()

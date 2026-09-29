@@ -40,6 +40,12 @@ def before_model_hooks(classifier: InjectionClassifier | None) -> list[Hook]:
 # reads and scans every prompt file. No classifier here; the output guard is code-only (§ 7.7).
 AFTER_MODEL: list[Hook] = [no_secrets, no_internal_tags, no_prompt_leak]
 
+# #16: the most one chat may spend on model calls, in US dollars, before new messages are refused
+# (api.py checks it before running the graph). $0.50 is roughly 150 turns at today's haiku prices —
+# far more than a normal chat needs, low enough that a runaway loop can't run up a surprise bill.
+# The check sits before a turn, so the turn that crosses the line still finishes; the next is refused.
+CHAT_BUDGET_USD = 0.50
+
 # #17: only the read-only web_search tool is exposed; returned page text is untrusted.
 BEFORE_TOOL: list[Hook] = [allowlisted_tool_call, valid_web_search_query, within_web_search_budget]
 AFTER_TOOL: list[Hook] = [flag_instruction_like_tool_result]

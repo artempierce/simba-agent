@@ -90,7 +90,7 @@ Every node calls `emit_trace(stage, status, detail, start, tokens)` **exactly on
  "ms": 640, "input_tokens": 212, "output_tokens": 31, "cost_usd": 0.000367}
 ```
 
-`stage` ∈ `before_model | agent | before_tool | web_search | after_tool | after_model | refuse` (`intent`/`reason`/`generate` on chats saved
+`stage` ∈ `before_model | agent | before_tool | web_search | after_tool | after_model | refuse | budget` (`budget` is sent by api.py, not a node — § 9; `intent`/`reason`/`generate` on chats saved
 before #33; `guard`/`output_guard` on chats saved before #32; `echo` existed in steps 1–4 only).
 `status` ∈ `ok | blocked | error | flagged` (`flagged` = passed, but a hook raised a flag — shown as ⚑
 in the trace panel, in the guard colour, not the error colour). Detail formats are given per node in
@@ -274,6 +274,12 @@ becomes a database key. Every turn's run (`prompt`, trace `lines`, `summary` or 
 the chat on `done` and on `error`; if the stream is cut off (client disconnect) it is saved anyway
 with `error = "interrupted before the reply finished"`.
 
+Budget (#16): right after `start`, `ChatStore.spent_usd(chat_id)` is compared with
+`harness/settings.py`'s `CHAT_BUDGET_USD` (0.50). At or over it, the graph is not run: one `trace`
+`{"stage": "budget", "status": "blocked", "detail": "spent $x of $0.50", ...}` (all token and cost
+fields 0), then `error` `{"message": "This chat reached its $0.50 budget. Please start a new chat."}`;
+the run is saved with that error. The refused message never reaches the checkpointer.
+
 SSE framing: `event: {name}\ndata: {json}\n\n`. Run with
 `graph.astream(input, {"configurable": {"thread_id": chat_id}}, stream_mode=["messages", "custom"])`.
 Forward `custom` chunks as `trace`. Forward `messages` chunks as `token` **only** when
@@ -299,7 +305,8 @@ runs(id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT NOT NULL, prompt TEXT NO
 `class ChatStore`: `await ChatStore.open(db_path)`, `create(title, chat_id=None) -> dict`,
 `list() -> list[dict]` (newest `updated_at` first), `get(id) -> dict | None`,
 `rename(id, title) -> dict | None`, `touch(id)`, `delete(id) -> bool` (chat + its runs),
-`add_run(chat_id, prompt, lines, summary, error)`, `runs(chat_id) -> list[dict]` (oldest first), `close()`.
+`add_run(chat_id, prompt, lines, summary, error)`, `runs(chat_id) -> list[dict]` (oldest first),
+`spent_usd(chat_id) -> float` (sum of `cost_usd` over all saved trace lines, failed runs included; #16), `close()`.
 A chat dict is `{"id", "title", "created_at", "updated_at"}`; a run dict is
 `{"prompt", "lines", "summary", "error"}` (the frontend's `Run`, § 11).
 

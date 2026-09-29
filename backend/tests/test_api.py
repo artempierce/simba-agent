@@ -431,3 +431,36 @@ async def test_disconnect_mid_stream_still_saves_the_run(monkeypatch, tmp_path):
             assert run["summary"] is None and run["error"] == "interrupted before the reply finished"
         finally:
             await verify_store.close()
+
+
+async def test_chat_over_budget_is_refused_before_the_graph_runs(tmp_path):
+    """#16: once a chat has spent CHAT_BUDGET_USD, a new message is refused in code — one `budget`
+    trace line, then an `error` asking for a new chat — and the graph never runs, so the refusal
+    itself costs nothing. The refused turn is still saved, so the reopened chat shows why."""
+    async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (app, client):
+        # A chat whose earlier turn already cost the whole budget (the fake model itself costs $0).
+        chat = await app.state.chats.create("pricey chat")
+        await app.state.chats.add_run(chat["id"], "earlier", [{"stage": "agent", "cost_usd": 0.50}], None, None)
+
+        events = parse_sse((await client.post("/api/chat", json={"message": "one more?", "chat_id": chat["id"]})).text)
+
+        assert [name for name, _ in events] == ["start", "trace", "error"]
+        assert events[1][1]["stage"] == "budget" and events[1][1]["status"] == "blocked"
+        assert "budget" in events[2][1]["message"]
+
+        opened = (await client.get(f"/api/chats/{chat['id']}")).json()
+        assert opened["messages"] == []  # the graph never saw the refused message
+        assert opened["runs"][-1]["prompt"] == "one more?"
+        assert opened["runs"][-1]["error"] == events[2][1]["message"]
+
+
+async def test_chat_just_under_budget_still_answers(tmp_path):
+    """The limit is "at or over", not "near": a chat a cent short of the budget gets a normal turn."""
+    async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (app, client):
+        chat = await app.state.chats.create("almost spent")
+        await app.state.chats.add_run(chat["id"], "earlier", [{"stage": "agent", "cost_usd": 0.49}], None, None)
+
+        events = parse_sse((await client.post("/api/chat", json={"message": "hi", "chat_id": chat["id"]})).text)
+
+        assert events[-1][0] == "done"
+        assert "budget" not in [data.get("stage") for name, data in events if name == "trace"]
