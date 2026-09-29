@@ -40,7 +40,7 @@
         },
         "responses": {
           "200": {
-            "description": "The turn as a stream of SSE blocks. Order: `start` (once, first) → `trace` (one per hook point/node) and `token` (answer text as it streams) → `replace` (only if after_model retracted the answer, or the agent's own report_unsafe fired after already streaming text) → `done` (once, last). On an exception after `start`, `error` replaces `done` and ends the stream.",
+            "description": "The turn as a stream of SSE blocks. Order: `start` (once, first) → `trace` (one per hook point/node) and `token` (answer chunks sent only after after_model approves the complete reply) → `replace` (only if after_model retracted the buffered answer) → `done` (once, last). On an exception after `start`, `error` replaces `done` and ends the stream.",
             "x-sse-events": ["start", "trace", "token", "replace", "error", "done"],
             "content": {
               "text/event-stream": {
@@ -285,7 +285,7 @@
       },
       "TokenEvent": {
         "type": "object",
-        "description": "A piece of the answer as it streams (only the agent node's text). A refusal, which calls no model, arrives as one token with the whole fixed reply.",
+        "description": "A piece of the answer (only the agent node's text), sent after the complete reply passes after_model. A refusal, which calls no model, arrives as one token with the whole fixed reply.",
         "required": ["event", "data"],
         "properties": {
           "event": { "const": "token" },
@@ -294,7 +294,7 @@
       },
       "ReplaceEvent": {
         "type": "object",
-        "description": "#15: the output guard retracted the answer after it streamed, or #33: the agent's own report_unsafe fired after it had already streamed some text. The page replaces the whole reply with `text`.",
+        "description": "#15: after_model retracted the buffered answer; none of its text was sent to the browser. The page replaces the empty reply bubble with `text`.",
         "required": ["event", "data"],
         "properties": {
           "event": { "const": "replace" },

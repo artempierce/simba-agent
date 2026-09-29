@@ -368,7 +368,7 @@ AFTER_TOOL   = []   <span class="c"># #17: size cap, wrap as untrusted, injectio
       <p>One node replaces intent, reason and generate. It makes a single streamed model call with the system prompt, the recent conversation and one tool attached.</p>
       <ol>
         <li><strong>Build the prompt.</strong> <code>system.md</code>, plus a short note if a hook flagged the message (our own words and the flag string only, never user text), plus the last 20 messages.</li>
-        <li><strong>Call the model</strong> with <code>report_unsafe</code> attached as a tool (see <code>bind_tools</code> in LangChain). Tokens stream to the chat as they arrive.</li>
+        <li><strong>Call the model</strong> with <code>report_unsafe</code> attached as a tool (see <code>bind_tools</code> in LangChain). The API buffers text chunks until <code>after_model</code> checks the complete reply, then forwards only an approved answer.</li>
         <li><strong>Read the reply.</strong> A plain text reply is appended to the conversation and goes to <code>after_model</code>. A call to <code>report_unsafe(kind, reason)</code> writes a blocked verdict (<code>agent-injection</code> or <code>agent-harmful</code>) and routes to <code>refuse</code>. The reply is not saved.</li>
       </ol>
       <div class="trace" role="img" aria-label="Example report_unsafe tool call">
@@ -376,7 +376,7 @@ AFTER_TOOL   = []   <span class="c"># #17: size cap, wrap as untrusted, injectio
         <div>&nbsp;&nbsp;"reason": "asks how to get into someone else's email account" })</div>
       </div>
       <p><strong>Where did "intent" and "plan" go?</strong> Into the model's own reasoning, inside the call. A clarifying question is now an ordinary text reply that the prompt asks for when a guess would likely be wrong. The trace shows the agent's outcome (answer or <code>report_unsafe</code>) and its token counts.</p>
-      <p class="note">If the model writes some text before calling <code>report_unsafe</code>, that text has already streamed to the page. The API handles it like a retraction and swaps the bubble for the fixed refusal. The prompt asks the model to call the tool without writing anything first.</p>
+      <p class="note">Text from a <code>report_unsafe</code> response is never sent to the page; the API discards buffered chunks and shows the fixed refusal. Likewise, an answer that fails <code>after_model</code> is replaced before any of its text reaches the browser.</p>
     </section>
 
     <section id="later">
