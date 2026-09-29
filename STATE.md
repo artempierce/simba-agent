@@ -17,6 +17,7 @@ None open — next items need the owner's input before they can be planned (see 
 - #39 subagents (needs owner answers) · #13 / #14 memory designs
 
 ## Recently done
+#52 fresher search: today's date in the prompt, `topic`/`time_range` per search, query + filters in the trace ·
 #50 fix: trace panel's sr-only labels no longer stretch the page (empty scroll) ·
 #48 fix: a call to a tool that isn't configured becomes a text answer (was KeyError 'before_tool') ·
 #16 per-chat cost budget: $0.50 (`harness/settings.py`), checked in `api.py` before the graph ·

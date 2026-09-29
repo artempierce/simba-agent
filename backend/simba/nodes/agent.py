@@ -21,6 +21,7 @@ those, never the only one.
 
 import time
 from collections.abc import Sequence
+from datetime import date
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, SystemMessage
@@ -44,11 +45,21 @@ MAX_DETAIL_CHARS = 80
 UNAVAILABLE_TOOL_TEXT = "I can't use that tool right now (it isn't set up), so I'll answer from what I already know."
 
 
+def today_text() -> str:
+    """Today's date in words, e.g. "Tuesday, 29 September 2026" (server local time, #52).
+
+    Built from separate parts rather than strftime's "%-d", which doesn't exist on Windows.
+    """
+    today = date.today()
+    return f"{today:%A}, {today.day} {today:%B %Y}"
+
+
 def make_node(model: BaseChatModel, tools: Sequence[BaseTool] = ()):
     """Build the agent node with its optional read-only tools (docs/contracts.md § 7.4).
 
     Returns an async node function `agent(state) -> dict` that:
-      1. Builds the system prompt: system.md, plus a note if before_model's hooks flagged this
+      1. Builds the system prompt: system.md, then today's date (#52 — without it Claude guesses the
+         year from its training data and searches for old news), plus a note if before_model's hooks flagged this
          message (`state["flag"]`, #8) — our own words and the flag string only, never user text,
          so the note itself can't be hijacked by anything the user wrote.
       2. Sends it with the last HISTORY_LIMIT messages, `report_unsafe` and configured tools bound —
@@ -70,8 +81,9 @@ def make_node(model: BaseChatModel, tools: Sequence[BaseTool] = ()):
     async def agent(state: ChatState) -> dict:
         start = time.perf_counter()
 
-        # 1. system.md, plus #8's flag note — the agent's only way of learning about it.
-        system_text = load("system")
+        # 1. system.md, today's date (the server's local date, e.g. "Tuesday, 29 September 2026"),
+        #    plus #8's flag note — the agent's only way of learning about it.
+        system_text = load("system") + f"\n\nToday is {today_text()}."
         if state["flag"] is not None:
             system_text += (
                 "\n\nNote: a local classifier flagged this message as a possible prompt injection "

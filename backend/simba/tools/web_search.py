@@ -4,13 +4,17 @@ web_search.py — the optional, read-only Tavily search tool (#17).
 Where it sits: the agent may call `web_search` during the ReAct loop. This wrapper runs tool hooks,
 keeps external result text bounded, and fences it as untrusted data before LangGraph adds it to the
 conversation. Without `TAVILY_API_KEY`, no Tavily client or model-visible search tool is created.
+
+#52: the model picks a `topic` ("news" for current events) and a `time_range` ("day" for today) per
+search, and the trace line shows the query and those filters, so a stale answer can be traced back
+to the search that caused it.
 """
 
 import json
 import logging
 import os
 import time
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from langchain_core.tools import BaseTool, tool
 
@@ -22,6 +26,21 @@ from simba.harness.settings import AFTER_TOOL
 MAX_TOOL_RESULT_CHARS = 8_000
 MAX_RESULTS = 5
 logger = logging.getLogger(__name__)
+
+# Trace details are shown in a narrow panel column (docs/contracts.md § 6): keep them short.
+MAX_TRACE_DETAIL_CHARS = 80
+
+
+def make_tavily_client() -> Any:
+    """Build the real Tavily client (reads TAVILY_API_KEY itself; no request is made here).
+
+    Why `topic` and `time_range` are NOT set here (#52): langchain-tavily lets a value set at
+    construction override the one passed with each search. Setting topic="general" here once made
+    every "news" search silently run as "general". Leaving them unset lets each call choose.
+    """
+    from langchain_tavily import TavilySearch
+
+    return TavilySearch(max_results=MAX_RESULTS, include_answer=False, include_raw_content=False)
 
 
 class SearchClient(Protocol):
@@ -45,23 +64,33 @@ def make_web_search_tool(search_client: SearchClient | None = None) -> BaseTool 
     if search_client is None:
         if not os.getenv("TAVILY_API_KEY", "").strip():
             return None
-        from langchain_tavily import TavilySearch
+        search_client = make_tavily_client()
 
-        search_client = TavilySearch(
-            max_results=MAX_RESULTS,
-            topic="general",
-            include_answer=False,
-            include_raw_content=False,
-        )
-
+    # The docstring below is not just for readers: LangChain sends it to Claude as the tool's
+    # description, so it is where Claude learns when to pick "news" and "day" (#52). The Literal
+    # values repeat TOPICS / TIME_RANGES because type hints need the values written out;
+    # test_web_search.py checks that the two lists match.
     @tool("web_search")
-    async def web_search(query: str) -> str:
-        """Search the web for current information and return short source snippets and URLs."""
+    async def web_search(
+        query: str,
+        topic: Literal["general", "news"] = "general",
+        time_range: Literal["day", "week", "month", "year"] | None = None,
+    ) -> str:
+        """Search the web and return short source snippets with URLs and, for news, published dates.
+
+        For news, current events or anything "today", "latest" or "this week", use topic="news" and
+        time_range="day" (or "week" if a day finds too little). Don't put a year or month in the query
+        to make it recent; use time_range. For timeless facts use topic="general" and no time_range.
+        """
         started = time.perf_counter()
-        # 1. The graph-level before_tool node already validated the tool name and query.
-        # 2. Search with the configured client; hide provider exception text and credentials.
+        # 1. The graph-level before_tool node already validated the tool name, query and filters.
+        # 2. Search with the configured client; hide provider exception text and credentials. A
+        #    time_range is only sent when chosen: Tavily treats a missing one as "any time".
+        params: dict[str, str] = {"query": query, "topic": topic}
+        if time_range:
+            params["time_range"] = time_range
         try:
-            raw_result = await search_client.ainvoke({"query": query})
+            raw_result = await search_client.ainvoke(params)
         except Exception as exc:
             logger.warning("Tavily search failed (%s)", type(exc).__name__)
             emit_trace("web_search", "error", "search service unavailable", started)
@@ -78,9 +107,13 @@ def make_web_search_tool(search_client: SearchClient | None = None) -> BaseTool 
             return "Search results were withheld because they failed a safety check."
         flagged = any(result.action == "flag" for result in after_results)
         result_count = len(raw_result.get("results", [])) if isinstance(raw_result, dict) else 0
+        filters = " · ".join(f for f in (topic, time_range) if f)
         detail = f"{result_count} result(s)" if result_count else "search complete"
+        detail += f" · {filters}"
         if was_truncated:
             detail += " · capped"
+        # The query goes last so the trace's 80-character limit cuts the query, not the filters.
+        detail = f'{detail} · "{query}"'[:MAX_TRACE_DETAIL_CHARS]
         emit_trace("web_search", "flagged" if flagged else "ok", detail, started)
 
         # 4. Escape any fake opening/closing wrapper in the page text before adding our own fence.

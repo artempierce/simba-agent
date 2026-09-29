@@ -16,6 +16,7 @@ from simba.harness.output_guard import no_internal_tags, no_prompt_leak, no_secr
 from simba.harness.tool_hooks import (
     allowlisted_tool_call,
     flag_instruction_like_tool_result,
+    valid_web_search_filters,
     valid_web_search_query,
     within_web_search_budget,
 )
@@ -47,5 +48,5 @@ AFTER_MODEL: list[Hook] = [no_secrets, no_internal_tags, no_prompt_leak]
 CHAT_BUDGET_USD = 0.50
 
 # #17: only the read-only web_search tool is exposed; returned page text is untrusted.
-BEFORE_TOOL: list[Hook] = [allowlisted_tool_call, valid_web_search_query, within_web_search_budget]
+BEFORE_TOOL: list[Hook] = [allowlisted_tool_call, valid_web_search_query, valid_web_search_filters, within_web_search_budget]
 AFTER_TOOL: list[Hook] = [flag_instruction_like_tool_result]
