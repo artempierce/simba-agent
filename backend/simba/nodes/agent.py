@@ -23,10 +23,10 @@ import time
 from collections.abc import Sequence
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
-from simba.common import emit_trace, recent, tokens_used
+from simba.common import emit_trace, recent, text_of, tokens_used
 from simba.harness.tool_hooks import MAX_WEB_SEARCH_CALLS_PER_TURN
 from simba.prompts import load
 from simba.schemas import ReportUnsafe
@@ -38,6 +38,10 @@ HISTORY_LIMIT = 20
 
 # Trace details are shown in a narrow panel column (docs/contracts.md § 6): keep them short.
 MAX_DETAIL_CHARS = 80
+
+# #48: the reply when the model asks for a tool this graph doesn't have (e.g. web_search with no
+# TAVILY_API_KEY) and wrote no text of its own. Said plainly, so the user knows why nothing was searched.
+UNAVAILABLE_TOOL_TEXT = "I can't use that tool right now (it isn't set up), so I'll answer from what I already know."
 
 
 def make_node(model: BaseChatModel, tools: Sequence[BaseTool] = ()):
@@ -54,6 +58,10 @@ def make_node(model: BaseChatModel, tools: Sequence[BaseTool] = ()):
          "agent-harmful") naming the model's own reason, and is NOT appended to `messages` — the
          graph routes straight to refuse instead. A plain text reply is appended as usual, ready for
          after_model to check next.
+      4. #48: a call to a tool this graph doesn't have (real Claude asked for web_search with search
+         switched off) is dropped: the reply becomes plain text — the model's own words, or
+         UNAVAILABLE_TOOL_TEXT — so it goes to after_model like any answer. Without this the graph
+         would route to a before_tool node that doesn't exist and crash the turn.
 
     Why a factory: LangGraph nodes take only `state`, but this node needs a model and its configured
     tools. graph.py binds those once when it builds the graph.
@@ -88,6 +96,18 @@ def make_node(model: BaseChatModel, tools: Sequence[BaseTool] = ()):
             detail = f"report_unsafe · {parsed.kind} · {parsed.reason}"[:MAX_DETAIL_CHARS]
             emit_trace("agent", "blocked", detail, start, tokens)
             return {"verdict": {"status": "blocked", "rule": rule, "reason": parsed.reason}}
+
+        # 4. Drop calls to tools this graph doesn't have. All calls go, not just the unknown one: the
+        #    reply's content can carry the calls as blocks, so rebuilding it from text alone is the
+        #    only way to be sure no half-answered call is saved into the history.
+        known = {tool.name for tool in tools}
+        unknown = [call["name"] for call in reply.tool_calls if call["name"] not in known]
+        if unknown:
+            text = text_of(reply) or UNAVAILABLE_TOOL_TEXT
+            reply = AIMessage(content=text, usage_metadata=reply.usage_metadata)
+            detail = f"asked for unavailable tool · {unknown[0]}"[:MAX_DETAIL_CHARS]
+            emit_trace("agent", "ok", detail, start, tokens)
+            return {"messages": [reply]}
 
         detail = (
             f"tool call · {reply.tool_calls[0]['name']}"
