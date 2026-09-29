@@ -1,24 +1,26 @@
 """
 classifier.py — guard layer 2: a local prompt-injection classifier (#8, contracts.md § 7.1b).
 
-Where it sits: `nodes/guard.py` calls `score()` after `simba/guard.py`'s regex rules (layer 1) have
-already passed. The two layers have different jobs and different policies:
+Where it sits: `classifier_hook(classifier)`, below, wraps `score()` into a `before_model` hook that
+`settings.py` lists after `harness/guard.py`'s regex rules (layer 1) — `harness/hooks.py`'s runner
+stops at the first block, so the classifier never runs on a message layer 1 already blocked. The two
+layers have different jobs and different policies:
 
   layer 1 (regex)     matches a known phrasing exactly           -> BLOCKS the turn outright
   layer 2 (this file)  a model's judgement call, 0-1 probability -> flag only, never block (§ 7.2)
 
 Policy (Sol, 2026-09-27): a flagged message is still answered — a model score is a probability, not
-a fact, and refusing every borderline message would be too blunt. Instead the guard writes a `flag`
-onto the state (state.py) and the intent node (§ 7.4) is told about it, so the LLM safety check can
-weigh it while judging the message itself.
+a fact, and refusing every borderline message would be too blunt. Instead `classifier_hook` flags
+(HookResult, never blocks) and `nodes/hook_points.py`'s `before_model` node writes it onto the state
+(state.py) so the intent node (§ 7.4) can weigh it while judging the message itself.
 
 The model: protectai/deberta-v3-base-prompt-injection-v2 (Apache-2.0). We run its ONNX export with
 `onnxruntime` (a C++ engine that runs an already-trained neural network fast, without needing the
 much larger PyTorch library that trained it) and `tokenizers` (turns text into the integer ids the
 model expects), on CPU — no GPU, no API call, no cost. `load_classifier()` never downloads on its own
-(the ONNX file alone is ~740 MB): run `uv run python -m simba.classifier` once, by hand, to fetch it
-into `data/models/prompt-injection/`. Until then, every chat behaves exactly as it did before this
-file existed (`load_classifier()` returns None, and the guard says so in its trace line).
+(the ONNX file alone is ~740 MB): run `uv run python -m simba.harness.classifier` once, by hand, to
+fetch it into `data/models/prompt-injection/`. Until then, every chat behaves exactly as it did before
+this file existed (`load_classifier()` returns None, and `classifier_hook` says so in its trace line).
 
 The model only takes 512 tokens at a time. A message longer than that is split into windows (see
 `split_windows`/`score_windows` below) and scored window by window; the highest window's score is the
@@ -31,9 +33,17 @@ loading and download logic are unchanged).
 """
 
 import json
+import logging
 import math
 from pathlib import Path
 from typing import Callable, Iterable, Protocol
+
+from simba.harness.hooks import Hook, HookResult
+
+# So a classifier crash still leaves a full traceback somewhere findable (server logs), even though
+# `classifier_hook`'s policy deliberately hides it from the user and the trace panel behind "classifier
+# failed".
+logger = logging.getLogger(__name__)
 
 # The model repo on the Hub, and which of its files we need. `onnx/` holds the ONNX export
 # alongside a copy of the tokenizer; we skip the ~370 MB PyTorch weights (model.safetensors) and
@@ -41,8 +51,9 @@ from typing import Callable, Iterable, Protocol
 MODEL_REPO = "protectai/deberta-v3-base-prompt-injection-v2"  # Apache-2.0, ONNX export in its onnx/ folder
 
 # The repo root, computed from this file's own path (same trick as api.py's DEFAULT_DB_PATH):
-# backend/simba/classifier.py -> parent (simba) -> parent (backend) -> parent (repo root).
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+# backend/simba/harness/classifier.py -> parent (harness) -> parent (simba) -> parent (backend)
+# -> parent (repo root).
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 MODEL_DIR = _REPO_ROOT / "data" / "models" / "prompt-injection"  # git-ignored, downloaded once
 
 _ONNX_FILE = "onnx/model.onnx"
@@ -71,7 +82,7 @@ SAMPLE_TEXTS = [
 
 
 class InjectionClassifier(Protocol):
-    """Anything that can score a piece of text for prompt injection. `nodes/guard.py` only depends
+    """Anything that can score a piece of text for prompt injection. `classifier_hook` only depends
     on this shape, never on `OnnxInjectionClassifier` directly, so tests can hand it a tiny fake
     instead of loading the real 740 MB model."""
 
@@ -121,7 +132,7 @@ def _softmax(logits: Iterable[float]) -> list[float]:
 class OnnxInjectionClassifier:
     """The real classifier: the DeBERTa-v3 prompt-injection model, run from its ONNX export on CPU.
 
-    Loading the tokenizer and the ONNX session happens once, here in `__init__` — `nodes/guard.py`
+    Loading the tokenizer and the ONNX session happens once, here in `__init__` — `classifier_hook`
     calls `score()` on every message, so the model must already be loaded by then, not reloaded per
     call. `load_classifier()` is what makes this constructor run exactly once, at server start-up.
     """
@@ -195,6 +206,45 @@ def load_classifier() -> InjectionClassifier | None:
     return OnnxInjectionClassifier()
 
 
+def classifier_hook(classifier: InjectionClassifier | None) -> Hook:
+    """Wrap `classifier` (or None, meaning "off") into a `before_model` hook (#8, #32, D15).
+
+    Args:
+        classifier: scores a message's P(injection); None skips scoring entirely — `settings.py`
+                    passes the real one when its files are on disk, tests pass a fake or nothing.
+
+    Returns a `Hook` (`text -> HookResult`) that:
+      - no classifier -> allow, reason "classifier off".
+      - `classifier.score(text)` raises -> **flag**, never block (fail toward caution, D15): rule and
+        reason "classifier failed", and the real traceback goes to the logger, same policy the old
+        `nodes/guard.py` used.
+      - score >= THRESHOLD -> flag, rule and reason `f"classifier {score:.2f}"`.
+      - score < THRESHOLD -> allow, reason `f"classifier {score:.2f}"`.
+
+    The classifier's own `.score()` stays a plain, blocking call — `harness/hooks.py`'s `run_hooks`
+    already runs every hook through `asyncio.to_thread`, so the ONNX call runs off the event loop
+    without this hook needing to know that.
+    """
+
+    def hook(text: str) -> HookResult:
+        if classifier is None:
+            return HookResult("allow", None, "classifier off")
+        try:
+            score = classifier.score(text)
+        except Exception:
+            # Fail toward caution: a broken classifier is treated like a flag, never a silent "ok",
+            # and never a crash. logger.exception() keeps the real traceback in the server logs; the
+            # trace panel and the flag itself deliberately stay generic (never leak internals).
+            logger.exception("classifier.score() raised; flagging the message instead of crashing")
+            return HookResult("flag", "classifier failed", "classifier failed")
+        if score >= THRESHOLD:
+            return HookResult("flag", f"classifier {score:.2f}", f"classifier {score:.2f}")
+        return HookResult("allow", None, f"classifier {score:.2f}")
+
+    hook.__name__ = "classifier_hook"
+    return hook
+
+
 def _download() -> None:
     """Fetch only the ONNX graph, its tokenizer file and its config from the model repo — not the
     PyTorch weights the repo also carries — into MODEL_DIR."""
@@ -208,7 +258,7 @@ def _download() -> None:
 
 
 if __name__ == "__main__":
-    # `uv run python -m simba.classifier`: download the model if it isn't on disk yet (skipped on a
+    # `uv run python -m simba.harness.classifier`: download the model if it isn't on disk yet (skipped on a
     # second run), then print scores for a handful of sample phrases so you can see the model's
     # judgement for yourself.
     if load_classifier() is None:

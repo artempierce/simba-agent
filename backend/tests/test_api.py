@@ -76,7 +76,7 @@ async def test_chat_event_order_and_streamed_answer(tmp_path):
         assert start_data["title"] == "hello"  # a new chat is titled from its first message
         assert isinstance(start_data["chat_id"], str) and start_data["chat_id"]
 
-        assert [data["stage"] for name, data in events if name == "trace"] == ["guard", "intent", "reason", "generate", "output_guard"]
+        assert [data["stage"] for name, data in events if name == "trace"] == ["before_model", "intent", "reason", "generate", "after_model"]
 
         tokens = [data["text"] for name, data in events if name == "token"]
         assert len(tokens) > 1
@@ -294,7 +294,7 @@ async def test_first_message_creates_the_sidebar_chat_and_saves_its_run(tmp_path
         ]
         [run] = opened["runs"]
         assert run["prompt"] == "plan my weekend"
-        assert [line["stage"] for line in run["lines"]] == ["guard", "intent", "reason", "generate", "output_guard"]
+        assert [line["stage"] for line in run["lines"]] == ["before_model", "intent", "reason", "generate", "after_model"]
         assert run["summary"] == events[-1][1] and run["error"] is None
 
 
@@ -323,7 +323,7 @@ async def test_error_turn_is_saved_with_its_error(monkeypatch, tmp_path):
         events = parse_sse((await client.post("/api/chat", json={"message": attack, "chat_id": None})).text)
         runs = await app.state.chats.runs(events[0][1]["chat_id"])
         assert runs[0]["summary"] is None and "state lookup boom" in runs[0]["error"]
-        assert [line["stage"] for line in runs[0]["lines"]] == ["guard", "refuse"]  # the trace block is kept
+        assert [line["stage"] for line in runs[0]["lines"]] == ["before_model", "refuse"]  # the trace block is kept
 
 
 async def test_unknown_chat_id_is_refused_not_created(tmp_path):

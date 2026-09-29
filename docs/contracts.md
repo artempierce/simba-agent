@@ -14,8 +14,12 @@ them in the same change.
 | `backend/simba/schemas.py` | `IntentCheck`, `Decision` | done (step 0) |
 | `backend/simba/common.py` | `text_of`, `tokens_used`, `recent`, `ms_since`, `emit_trace` | done (step 0) |
 | `backend/simba/prompts/` | `load(name)` + `system.md`, `intent.md`, `reason.md` | done (step 0) |
-| `backend/simba/guard.py` | injection rules + size check (pure functions) | § 7.1 |
-| `backend/simba/nodes/guard.py` | guard node | § 7.2 |
+| `backend/simba/harness/guard.py` | injection rules + size check, as `before_model` hooks | § 7.1 |
+| `backend/simba/harness/classifier.py` | local classifier + `classifier_hook` | § 7.1b |
+| `backend/simba/harness/output_guard.py` | output checks, as `after_model` hooks | § 7.7 |
+| `backend/simba/harness/hooks.py` | `HookResult`, `Hook`, `run_hooks` (#32) | § 7.2 |
+| `backend/simba/harness/settings.py` | which hooks run at each hook point (#32) | § 7.2 |
+| `backend/simba/nodes/hook_points.py` | `before_model` / `after_model` nodes (#32) | § 7.2, § 7.7 |
 | `backend/simba/nodes/refuse.py` | refuse node | § 7.3 |
 | `backend/simba/nodes/intent.py` | intent node | § 7.4 |
 | `backend/simba/nodes/reason.py` | reason node | § 7.5 |
@@ -83,15 +87,16 @@ Every node calls `emit_trace(stage, status, detail, start, tokens)` **exactly on
  "ms": 640, "input_tokens": 212, "output_tokens": 31, "cost_usd": 0.000367}
 ```
 
-`stage` ∈ `guard | intent | reason | generate | output_guard | refuse` (`echo` existed in steps 1–4 only).
-`status` ∈ `ok | blocked | error | flagged` (`flagged` = passed, but the classifier raised a flag —
-shown as ⚑ in the trace panel, in the guard colour, not the error colour). Detail formats are given
-per node in § 7. Keep details short
-(≤ 80 characters) and never put the system prompt in them.
+`stage` ∈ `before_model | intent | reason | generate | after_model | refuse` (`guard`/`output_guard` on
+chats saved before #32; `echo` existed in steps 1–4 only).
+`status` ∈ `ok | blocked | error | flagged` (`flagged` = passed, but a hook raised a flag — shown as ⚑
+in the trace panel, in the guard colour, not the error colour). Detail formats are given per node in
+§ 7; for `before_model`/`after_model`, `harness/hooks.py`'s `run_hooks` builds the line itself (§ 7.2).
+Keep details short (≤ 80 characters) and never put the system prompt in them.
 
 ## § 7 Nodes
 
-### § 7.1 `simba/guard.py` — pure rules, no LangGraph
+### § 7.1 `simba/harness/guard.py` — pure rules, two `before_model` hooks (#32)
 
 - `MAX_INPUT_CHARS = 1000` (Sol lowered it from 4000 on 2026-09-27: keeps each message's cost and
   latency small).
@@ -99,11 +104,13 @@ per node in § 7. Keep details short
   (`/Users/sol/art-lab/backend/artlab/guards/input.py`) **with their explanatory comments**:
   `disable-safety`, `ignore-instructions`, `reveal-prompt`, `role-hijack`, `fake-tags`.
   Change: `fake-tags` also matches `user_message` (our intent-check delimiter). No budget check.
-- `@dataclass(frozen=True) class GuardResult: rule: str | None; reason: str`
 - `find_injection(text) -> str | None` — first matching rule name.
-- `check_input(text) -> GuardResult` — size first, then injection. Pass reason: `"pass · {n} chars"`.
+- `size_limit(text) -> HookResult` — block "size" if over `MAX_INPUT_CHARS`, else allow, reason
+  `"{n} chars"`.
+- `injection_rules(text) -> HookResult` — block the first matching rule, else allow, reason
+  `"rules ok"`.
 
-### § 7.1b `simba/classifier.py` — local prompt-injection classifier (#8)
+### § 7.1b `simba/harness/classifier.py` — local prompt-injection classifier (#8, #32)
 
 Port of art-lab's `backend/artlab/guards/classifier.py` **with its explanations**: the ONNX export of
 `protectai/deberta-v3-base-prompt-injection-v2` on CPU (`onnxruntime` + `tokenizers`, no PyTorch, $0).
@@ -113,27 +120,42 @@ Port of art-lab's `backend/artlab/guards/classifier.py` **with its explanations*
   a long message is scored window by window and the **highest** window wins.
 - `OnnxInjectionClassifier(model_dir)` loads once; `load_classifier() -> InjectionClassifier | None`
   returns None when the files aren't on disk and **never downloads**.
-- `uv run python -m simba.classifier` downloads the three files (onnx/model.onnx, onnx/tokenizer.json,
-  onnx/config.json) if missing, then prints scores for a few sample phrases.
+- `uv run python -m simba.harness.classifier` downloads the three files (onnx/model.onnx,
+  onnx/tokenizer.json, onnx/config.json) if missing, then prints scores for a few sample phrases.
+- `classifier_hook(classifier: InjectionClassifier | None) -> Hook` — wraps `.score()` into a
+  `before_model` hook (D15): no classifier → allow "classifier off"; score raises → **flag**
+  "classifier failed" (fail toward caution, `logger.exception` logs the real traceback); score ≥
+  THRESHOLD → flag `f"classifier {score:.2f}"`; below → allow, reason `f"classifier {score:.2f}"`.
 
-### § 7.2 `simba/nodes/guard.py`
+### § 7.2 `simba/harness/hooks.py` + `simba/harness/settings.py` + `simba/nodes/hook_points.py` (#32)
 
-`make_node(classifier: InjectionClassifier | None = None) -> async def guard(state) -> dict`
-(was a plain function before #8). Checks the newest human message's text.
+Hooks replace the old single guard/output_guard functions: every check is a plain function
+`Hook = Callable[[str], HookResult]`, `HookResult(action: "allow"|"flag"|"block", rule: str | None,
+reason: str)`.
 
-1. Regex + size (`check_input`). Blocked → `{"verdict": blocked}`, trace `blocked`, detail
-   `blocked · {rule}`, verdict `{"status": "blocked", "rule": rule, "reason": reason}`. The classifier
-   never runs on a blocked message.
-2. Passed → verdict `pass`. Then, if a classifier is given, score the text **off the event loop**
-   (`await asyncio.to_thread(classifier.score, text)`):
-   - score ≥ THRESHOLD → `{"flag": f"classifier {score:.2f}"}`, trace status `flagged`,
-     detail `pass · 38 chars · classifier 0.97 ⚑`.
-   - score < THRESHOLD → no flag, trace `ok`, detail `pass · 38 chars · classifier 0.02`.
-   - the classifier raises → `{"flag": "classifier failed"}`, trace `flagged`, detail
-     `pass · 38 chars · classifier failed ⚑` (fail toward caution, never crash, never block).
-   - no classifier → trace `ok`, detail `pass · 38 chars · classifier off`.
-3. **Policy (Sol, 2026-09-27): flag, never block.** A flag does not change the verdict or the route;
-   it only informs the intent node (§ 7.4), which makes the final call.
+`settings.py` is the only place that lists which hooks run, in which order (cheapest first):
+`before_model_hooks(classifier) -> list[Hook]` returns `[size_limit, injection_rules,
+classifier_hook(classifier)]`; `AFTER_MODEL = [no_secrets, no_internal_tags, no_prompt_leak]`;
+`BEFORE_TOOL = AFTER_TOOL = []` (filled in by #17).
+
+`harness/hooks.py`'s `async def run_hooks(point: str, hooks: list[Hook], text: str) -> list[HookResult]`
+runs each hook **off the event loop** (`asyncio.to_thread`), in order, stopping at the first block. A
+raising hook becomes a block named `f"{hook.__name__}-error"` (fail closed, real traceback logged).
+It emits **one** trace line with `stage=point`: status `blocked` if any block, else `flagged` if any
+flag, else `ok`; detail `blocked · {rule}`, or `"pass · " + " · ".join(reasons)` (≤ 80 chars, D28).
+
+`nodes/hook_points.py` wires this into the graph:
+- `make_before_model(classifier) -> async def before_model(state) -> dict`: finds the newest human
+  message's text, runs `before_model_hooks(classifier)` through `run_hooks("before_model", ...)`. A
+  block → `{"verdict": {"status": "blocked", "rule": rule, "reason": reason}}` (same shape the old
+  guard node wrote, so `refuse`/`intent` don't change). No block → verdict `pass`; any flagged hooks'
+  `rule`s are joined with `"; "` into `state["flag"]` (§ 7.4 reads it unchanged).
+- `async def after_model(state) -> dict`: runs `AFTER_MODEL` on the newest reply through
+  `run_hooks("after_model", ...)`. No block → `{}`. A block → `{"messages": [AIMessage(RETRACT_TEXT,
+  id=answer.id)]}`, same retraction behaviour as § 7.7 always had.
+
+**Policy (Sol, 2026-09-27, D15): flag, never block.** A flag does not change the verdict or the
+route; it only informs the intent node (§ 7.4), which makes the final call.
 
 ### § 7.3 `simba/nodes/refuse.py`
 
@@ -188,32 +210,35 @@ detail `fixed reply · {verdict.rule}`. No model. Never echoes the user's messag
 3. `reply = await model.ainvoke(prompt)` — LangGraph streams its tokens (§ 9).
 4. Returns `{"messages": [reply]}`. Trace `ok`, detail `{output_tokens} tokens out`.
 
-### § 7.7 Output guard (#15): `simba/output_guard.py` + `simba/nodes/output_guard.py`
+### § 7.7 Output guard (#15, #32): `simba/harness/output_guard.py`, run by `nodes/hook_points.py`'s `after_model`
 
 Checks what Simba **writes**. Code only, no model, $0. Policy (Sol, 2026-09-27): **retract**.
-- `check_output(answer, prompts) -> GuardResult`, checks in order: `secret` (`sk-ant-…` or
-  `ANTHROPIC_API_KEY`), `internal-tags` (`<user_message>`, `<intent>`, any case/spacing),
-  `prompt-leak` (a run of `LEAK_WORDS = 8` consecutive words, lowercased, punctuation ignored, shared
-  with `system.md`, `intent.md` or `reason.md`). Pass reason `"pass · 3 checks"`.
+- Three `after_model` hooks, in `settings.AFTER_MODEL`'s order: `no_secrets` (`sk-ant-…` or
+  `ANTHROPIC_API_KEY`), `no_internal_tags` (`<user_message>`, `<intent>`, any case/spacing),
+  `no_prompt_leak` (a run of `LEAK_WORDS = 8` consecutive words, lowercased, punctuation ignored,
+  shared with `system.md`, `intent.md` or `reason.md` — `no_prompt_leak` loads those files itself).
+  Each returns a `HookResult`; allow reasons are short (`"no secrets"`, `"no tags"`, `"no leak"`).
 - `RETRACT_TEXT = "I can't share that. Let's talk about something else."`
-- Node `output_guard(state)`: pass → `{}`, trace `ok`; fail → `{"messages": [AIMessage(RETRACT_TEXT,
-  id=<the answer's id>)]}` (same id ⇒ `add_messages` overwrites the answer in the saved history),
-  trace `blocked`, detail `retracted · {rule}`.
+- `after_model(state)` (§ 7.2): pass → `{}`; fail → `{"messages": [AIMessage(RETRACT_TEXT,
+  id=<the answer's id>)]}` (same id ⇒ `add_messages` overwrites the answer in the saved history).
+  `harness/hooks.py`'s `run_hooks` writes the trace line (`blocked` · `blocked · {rule}`, or `ok`).
 
 ## § 8 Graph (`simba/graph.py`)
 
 `build_graph(model: BaseChatModel, checkpointer=None, classifier: InjectionClassifier | None = None) -> CompiledStateGraph`
-— the guard node is built with `guard.make_node(classifier)` (#8).
+— `before_model` is built with `hook_points.make_before_model(classifier)` (#8, #32).
 
-Final shape (step 5):
+Final shape (#32):
 ```
-START → guard ─┬─ pass ─→ intent ─┬─ pass ─→ reason → generate → output_guard → END
-               └ blocked → refuse └ blocked → refuse → END
+START → before_model ─┬─ pass ─→ intent ─┬─ pass ─→ reason → generate → after_model → END
+                      └ blocked → refuse └ blocked → refuse → END
 ```
-(`output_guard` added by #15; refuse's fixed text is not checked.)
-Routing functions `after_guard(state) -> "intent" | "refuse"` and `after_intent(state) -> "reason" | "refuse"`
-read `state["verdict"]["status"]`. Steps 1–4 used a placeholder `echo` node (replied
-`"You said: {text}"`); step 5 replaced it with `generate`, giving the final shape above.
+(`output_guard` renamed `after_model` by #32; refuse's fixed text is not checked.)
+Routing functions `after_before_model(state) -> "intent" | "refuse"` and
+`after_intent(state) -> "reason" | "refuse"` read `state["verdict"]["status"]`. Steps 1–4 used a
+placeholder `echo` node (replied `"You said: {text}"`); step 5 replaced it with `generate`; #32
+renamed `guard`/`output_guard` to `before_model`/`after_model` and moved their logic behind hooks,
+giving the final shape above.
 
 ## § 9 API (`simba/api.py`)
 

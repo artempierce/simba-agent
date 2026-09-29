@@ -1,7 +1,7 @@
 /**
  * TracePanel.tsx — the right pane: a log of what each backend graph node did for your message
- * (docs/contracts.md § 6, § 11). This is where Simba's guard/intent/reason/generate steps become
- * visible instead of a black box.
+ * (docs/contracts.md § 6, § 11). This is where Simba's before_model/intent/reason/generate/
+ * after_model steps become visible instead of a black box.
  *
  * Restyled 2026-09-27 (docs/visual-style.md → "Trace panel", Sol: "match design for right trace
  * part"): it used to be its own dark terminal column; now it sits on the same warm paper background
@@ -29,11 +29,13 @@ import type { Run, TraceLine } from '../types'
  * only ever answers "which node was this".
  */
 const STAGE_PILL: Record<string, string> = {
-  guard: 'bg-butter',
+  before_model: 'bg-butter',
+  guard: 'bg-butter', // saved before #32: chats from before the hooks redesign still show this name
   intent: 'bg-sky',
   reason: 'bg-blush',
   generate: 'bg-mint',
-  output_guard: 'bg-butter', // same colour as guard: both are code checks (#15 checks what Simba wrote)
+  after_model: 'bg-butter', // same colour as before_model: both are code + one local model call
+  output_guard: 'bg-butter', // saved before #32: same colour as guard, both are code checks (#15)
   refuse: 'bg-coral',
 }
 

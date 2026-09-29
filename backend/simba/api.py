@@ -45,11 +45,11 @@ from pydantic import BaseModel
 
 from simba.chats import ChatStore, title_from
 from simba.chats_api import router as chats_router
-from simba.classifier import InjectionClassifier, load_classifier
 from simba.common import ms_since, text_of
 from simba.graph import build_graph
+from simba.harness.classifier import InjectionClassifier, load_classifier
+from simba.harness.output_guard import RETRACT_TEXT
 from simba.model import cost_usd, make_model
-from simba.output_guard import RETRACT_TEXT
 
 # backend/.env holds SIMBA_FAKE_LLM / ANTHROPIC_API_KEY (git-ignored: the repo is public).
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -237,7 +237,7 @@ def create_app(
                         tokens_in += chunk.get("input_tokens", 0)
                         tokens_out += chunk.get("output_tokens", 0)
                         lines.append(chunk)
-                        if chunk.get("stage") == "output_guard" and chunk.get("status") == "blocked":
+                        if chunk.get("stage") == "after_model" and chunk.get("status") == "blocked":
                             retracted = True
                         yield sse("trace", chunk)
                     else:

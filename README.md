@@ -12,15 +12,18 @@ live in a trace panel next to the chat.
 ## How one message flows
 
 ```
-your message → guard (code rules + local classifier) ─┬─ blocked → refuse (fixed reply)
-                                                      └─ pass (maybe ⚑ flagged) → intent (LLM: restate + safety verdict) ─┬─ unsafe → refuse
-                                                                                                                         └─ safe → reason (LLM: action + plan) → generate (LLM: streamed answer) → output guard (code checks; retracts a leak)
+your message → before_model (hooks: size + regex + local classifier) ─┬─ blocked → refuse (fixed reply)
+                                                                      └─ pass (maybe ⚑ flagged) → intent (LLM: restate + safety verdict) ─┬─ unsafe → refuse
+                                                                                                                                         └─ safe → reason (LLM: action + plan) → generate (LLM: streamed answer) → after_model (hooks: retracts a leak)
 ```
 
-**Planned redesign** (design book 0.3, #32 / #33): the checks become hooks listed in
-`harness/settings.py`, and intent + reason + generate become one `agent` node — one model call per turn.
+Each hook point (`before_model`, `after_model`; `before_tool`/`after_tool` come with #17) runs the
+checks `harness/settings.py` lists for it, cheapest first, and stops at the first block (#32).
 
-The guard has two layers: regex rules that **block**, then a small local model
+**Next** (design book 0.3, #33): intent + reason + generate become one `agent` node — one model call
+per turn; the hook points and their checks don't change.
+
+The before_model hooks have two layers: regex rules that **block**, then a small local model
 (`protectai/deberta-v3-base-prompt-injection-v2`, runs on your CPU, $0) that only **flags** (⚑). A flag
 never blocks on its own: it tells the intent check to look carefully, and the LLM makes the call.
 
@@ -35,6 +38,7 @@ never blocks on its own: it tells the intent check to look carefully, and the LL
 | 4 | Reason | done |
 | 5 | Generate, then real Claude + token counts (#9) and the output guard (#15) | done |
 | 6 | Chats sidebar: new, open, rename, delete | done |
+| — | Harness redesign: guard/output_guard become before_model/after_model hooks (#32) | done |
 | 7 | Personality tuning | planned |
 
 **Known gap:** the frontend has no automated tests yet (only lint + type-check + build in CI). The
@@ -48,7 +52,7 @@ Needs [uv](https://docs.astral.sh/uv/) and Node 22+.
 ```bash
 cp backend/.env.example backend/.env          # SIMBA_FAKE_LLM=1 = free fake model
 cd backend && uv sync && uv run pytest -q
-cd backend && uv run python -m simba.classifier   # optional, once: downloads the ~740 MB injection classifier
+cd backend && uv run python -m simba.harness.classifier   # optional, once: downloads the ~740 MB injection classifier
 cd backend && uv run uvicorn simba.api:app --reload --port 8000
 cd frontend && npm install && npm run dev     # http://localhost:5173
 ```
@@ -72,10 +76,13 @@ simba-agent/
 │   ├── chats.py              ChatStore: chat titles + each turn's trace, in SQLite
 │   ├── chats_api.py          /api/chats: list, create, open, rename, delete
 │   ├── graph.py              draws the graph: which nodes run, in what order
-│   ├── guard.py              the code guard's rules: size limit (1,000 chars) + prompt-injection patterns
-│   ├── classifier.py         the local prompt-injection model the guard uses to flag (⚑) messages
-│   ├── output_guard.py       checks on the finished answer: secrets, internal tags, prompt leaks
-│   ├── nodes/                one file per graph node: guard, intent, reason, generate, output_guard, refuse
+│   ├── harness/
+│   │   ├── guard.py          before_model hooks: size limit (1,000 chars) + prompt-injection patterns
+│   │   ├── classifier.py     the local prompt-injection model + classifier_hook, flags (⚑) messages
+│   │   ├── output_guard.py   after_model hooks: secrets, internal tags, prompt leaks
+│   │   ├── hooks.py          HookResult, Hook, and run_hooks (the hook runner)
+│   │   └── settings.py       which hooks run at each hook point, in which order
+│   ├── nodes/                one file per graph node: hook_points (before_model/after_model), intent, reason, generate, refuse
 │   ├── model.py              real Claude or the free fake model; cost per call
 │   ├── state.py              the graph's state
 │   ├── schemas.py            structured-output shapes (IntentCheck, Decision)

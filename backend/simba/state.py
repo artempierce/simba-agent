@@ -40,7 +40,7 @@ class ChatState(TypedDict):
     decision  this turn's Decision from the reason node, stored as a plain dict
               {"action": "answer" | "clarify", "plan": [...]} so the checkpointer can save it
     flag      why the local classifier flagged this turn, e.g. "classifier 0.97" (#8); None = not
-              flagged. Set by the guard node, read by the intent node (nodes/guard.py § 7.2).
+              flagged. Set by before_model, read by the intent node (nodes/hook_points.py § 7.2).
     """
 
     messages: Annotated[list[AnyMessage], add_messages]

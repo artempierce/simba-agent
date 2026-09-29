@@ -1,16 +1,18 @@
 """
-guard.py — deterministic, pre-model safety checks on every user message.
+guard.py — deterministic, pre-model safety checks on every user message, as two `before_model` hooks
+(#32: hooks replace the old single `check_input`).
 
-Where it sits: the `guard` node (nodes/guard.py) calls `check_input()` first, before the intent node
-or any model call (contracts.md § 8: START → guard). If a check fails, the graph routes straight to
-`refuse` — the model never sees a blocked message, so a blocked message costs $0 and can't influence
-the model.
+Where it sits: `settings.py` lists `size_limit` before `injection_rules` in `before_model_hooks`
+(cheapest first), and the hook runner (`harness/hooks.py`) calls them in that order for every turn,
+before the intent node or any model call (contracts.md § 8). If a hook blocks, the runner stops there
+and the graph routes straight to `refuse` — the model never sees a blocked message, so a blocked
+message costs $0 and can't influence the model.
 
-The two checks, in the order they run:
+The two hooks:
 
-  1. size       — longer than MAX_INPUT_CHARS? Checked first because it's the cheapest, and so the
-                  regex rules never have to scan a huge string.
-  2. injection  — matches a known prompt-injection phrasing (INJECTION_RULES)?
+  1. size_limit       — longer than MAX_INPUT_CHARS? Listed first because it's the cheapest, and so
+                         the regex rules never have to scan a huge string.
+  2. injection_rules   — matches a known prompt-injection phrasing (INJECTION_RULES)?
 
 This is deliberately a *first layer*, not the whole defence (CLAUDE.md's "untrusted by default"
 rule). Regex only catches phrasings we thought of, and it can't tell an attack from a question about
@@ -23,14 +25,15 @@ Simba's own `<user_message>` delimiter tag (see that rule's comment below). `fin
 normalizes the text first (see `_normalize_for_matching`) so zero-width and fullwidth look-alike
 characters can't be used to sneak an attack past every rule at once.
 
-Design choice: `check_input()` returns a `GuardResult` instead of raising. The guard only *decides*;
-the guard node decides what to *do* about it (write a trace line, route to refuse). That keeps this
-file a pure function that's trivial to test.
+Design choice: each hook returns a `HookResult` (harness/hooks.py) instead of raising. A hook only
+*decides*; the hook runner decides what to *do* about it (write a trace line, stop at a block). That
+keeps this file a pair of pure functions that are trivial to test.
 """
 
 import re
 import unicodedata
-from dataclasses import dataclass
+
+from simba.harness.hooks import HookResult
 
 # Longest message accepted, in characters (~250 tokens). Protects cost and latency.
 MAX_INPUT_CHARS = 1000
@@ -125,20 +128,6 @@ INJECTION_RULES: dict[str, re.Pattern[str]] = {
 }
 
 
-@dataclass(frozen=True)
-class GuardResult:
-    """The guard's verdict on one message.
-
-    rule    None if the message passed; otherwise the name of the check that blocked it: "size" or
-            one of the INJECTION_RULES names.
-    reason  One human-readable sentence. Shown in the trace panel either way, and in the refusal
-            message when blocked.
-    """
-
-    rule: str | None
-    reason: str
-
-
 def _normalize_for_matching(text: str) -> str:
     """Undo two look-alike tricks that would otherwise slip past every regex above, unchanged.
 
@@ -151,8 +140,8 @@ def _normalize_for_matching(text: str) -> str:
        a hidden character between "ign" and "ore", which would stop `\bignore\b` from matching. NFKC
        doesn't remove these, so they're stripped explicitly, after normalizing.
 
-    Only used for injection matching. `check_input`'s size limit and its "pass · {n} chars" reason
-    keep using the raw text — silently shrinking what was actually sent would misreport the size.
+    Only used for injection matching. `size_limit`'s length check and its "{n} chars" reason keep
+    using the raw text — silently shrinking what was actually sent would misreport the size.
     """
     folded = unicodedata.normalize("NFKC", text)
     return "".join(char for char in folded if unicodedata.category(char) != "Cf")
@@ -174,23 +163,30 @@ def find_injection(text: str) -> str | None:
     return None
 
 
-def check_input(text: str) -> GuardResult:
-    """Run the input checks on one message and return the verdict.
+def size_limit(text: str) -> HookResult:
+    """Hook: block a message longer than MAX_INPUT_CHARS.
 
     Args:
         text: the message the user typed
 
     Returns:
-        A `GuardResult`. The first failing check wins; if both pass, `rule` is None and `reason`
-        reports the size, e.g. "pass · 44 chars".
+        A block naming "size" if too long, else allow with a short reason the trace can show
+        verbatim, e.g. "44 chars" (hooks.py prefixes it with "pass · " for the trace line).
     """
-    # 1. Size: reject overly long messages before doing any other work on them.
     if len(text) > MAX_INPUT_CHARS:
-        return GuardResult("size", f"message is {len(text)} chars; the limit is {MAX_INPUT_CHARS}")
+        return HookResult("block", "size", f"message is {len(text)} chars; the limit is {MAX_INPUT_CHARS}")
+    return HookResult("allow", None, f"{len(text)} chars")
 
-    # 2. Injection: try each rule in order; the first match names the block.
+
+def injection_rules(text: str) -> HookResult:
+    """Hook: block a message that matches a known prompt-injection phrasing.
+
+    Args:
+        text: the message the user typed
+
+    Returns:
+        A block naming the first matching rule, else allow with reason "rules ok".
+    """
     if rule := find_injection(text):
-        return GuardResult(rule, "looks like a prompt-injection attempt")
-
-    # Passed both checks.
-    return GuardResult(None, f"pass · {len(text)} chars")
+        return HookResult("block", rule, "looks like a prompt-injection attempt")
+    return HookResult("allow", None, "rules ok")
