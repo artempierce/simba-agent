@@ -14,9 +14,10 @@ None open — next items need the owner's input before they can be planned (see 
 ## Next up (post-MVP)
 - #10 Personality prompts (needs owner, one `system.md` to tune)
 - #30 Self-improvement (propose → approve → install), after the tool and approval design is ready
-- #12 Frontend tests (Vitest) · #16 Per-chat cost budget · #13 / #14 memory designs
+- #16 Per-chat cost budget · #39 subagents (needs owner answers) · #13 / #14 memory designs
 
 ## Recently done
+#12 frontend tests: Vitest for the SSE parser and App's stale-response guards, run in CI ·
 #17 Tavily `web_search` + ReAct loop (optional, needs `TAVILY_API_KEY`); the per-turn search budget
 ends the turn in code (follow-up to PR #44) · #42 no unsafe stream leaks, chat-delete race ·
 #33 one `agent` node replaces intent/reason/generate: `ReportUnsafe` tool, safety rules merged into

@@ -41,9 +41,9 @@ never blocks on its own: it tells the agent to look carefully, and the LLM makes
 | 17 | First read-only tool: optional Tavily web search + ReAct loop | in progress |
 | 7 | Personality tuning | planned |
 
-**Known gap:** the frontend has no automated tests yet (only lint + type-check + build in CI). The
-riskiest untested logic is App.tsx's stale-response guards (`requestedChatRef`, `chatsSeqRef`); a
-small Vitest suite is a good first addition after the MVP.
+**Frontend tests** (#12): a small Vitest suite covers the SSE parser (`src/api.test.ts`) and
+App.tsx's stale-response guards (`src/App.test.tsx`). Run it with `cd frontend && npm test`; CI runs
+it too.
 
 ## Run it
 
