@@ -17,6 +17,7 @@ None open — next items need the owner's input before they can be planned (see 
 - #39 subagents (needs owner answers) · #13 / #14 memory designs
 
 ## Recently done
+#48 fix: a call to a tool that isn't configured becomes a text answer (was KeyError 'before_tool') ·
 #16 per-chat cost budget: $0.50 (`harness/settings.py`), checked in `api.py` before the graph ·
 #12 frontend tests: Vitest for the SSE parser and App's stale-response guards, run in CI ·
 #17 Tavily `web_search` + ReAct loop (optional, needs `TAVILY_API_KEY`); the per-turn search budget
