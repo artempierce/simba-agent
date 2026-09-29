@@ -11,7 +11,7 @@ the history window is trimmed to start with a human message; and every run repor
 from langchain_core.messages import AIMessage, HumanMessage
 
 from simba.model import fake_model
-from simba.nodes.agent import make_node
+from simba.nodes.agent import HISTORY_LIMIT, make_node
 from tests.node_harness import run_node
 
 
@@ -72,11 +72,15 @@ async def test_unflagged_message_adds_no_note():
 
 async def test_history_window_is_trimmed_and_starts_with_human():
     """Only the last HISTORY_LIMIT messages are sent, and a stray leading non-human message in that
-    window is trimmed (common.recent) so the model's turn always starts with a human message."""
-    history = [AIMessage("stray reply"), HumanMessage("a"), AIMessage("b"), HumanMessage("c")]
+    window is trimmed (common.recent) so the model's turn always starts with a human message.
+
+    25 alternating messages (human first): the last 20 start with an AI reply, which is trimmed,
+    leaving 19 — so the prompt is the system message plus those 19."""
+    history = [HumanMessage(f"h{i}") if i % 2 == 0 else AIMessage(f"a{i}") for i in range(HISTORY_LIMIT + 5)]
     model = fake_model()
     node = make_node(model)
     await run_node(node, {"messages": history})
     prompt = model.calls[-1]
     assert prompt[0].type == "system"
-    assert prompt[1].type == "human"  # the leading stray AI message was trimmed off
+    assert prompt[1].type == "human"  # the leading AI message of the window was trimmed off
+    assert prompt[1:] == history[-(HISTORY_LIMIT - 1):]  # older messages never reach the model

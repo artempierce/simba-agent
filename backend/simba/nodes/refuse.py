@@ -1,8 +1,9 @@
 """
-nodes/refuse.py — the graph's fixed refusal reply, used whenever the guard or intent node blocks a
-message.
+nodes/refuse.py — the graph's fixed refusal reply, used whenever before_model's hooks or the agent
+node's report_unsafe call blocks a message.
 
-Where it sits: `after_guard` / `after_intent` route straight here on "blocked" (contracts.md § 8).
+Where it sits: `after_before_model` / `after_agent` (graph.py) route straight here on "blocked"
+(contracts.md § 8).
 It never reads or repeats the user's text — the whole point of a hard-coded reply is that a blocked
 message can't influence what Simba says back (CLAUDE.md's "untrusted by default" rule).
 """
