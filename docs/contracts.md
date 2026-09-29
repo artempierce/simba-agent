@@ -183,6 +183,9 @@ reason and generate (D21); the model can now also call the configured read-only 
 4. A `ReportUnsafe` call writes a blocked verdict and is not appended to `messages`. A `web_search`
   call is appended as an AI tool-call message; ToolNode appends its result, then the graph calls the
   agent again. No tool call means the text answer is appended and checked by `after_model`.
+5. #48: a call to a tool the graph doesn't have (e.g. `web_search` with no `TAVILY_API_KEY`) drops
+  *all* the reply's tool calls; the reply becomes `AIMessage(text_of(reply) or UNAVAILABLE_TOOL_TEXT)`,
+  trace detail `asked for unavailable tool · {name}`, and goes to `after_model` like any answer.
 
 ### § 7.7 Output guard (#15, #32): `simba/harness/output_guard.py`, run by `nodes/hook_points.py`'s `after_model`
 
