@@ -33,19 +33,19 @@
         "tags": ["chat"],
         "operationId": "chat",
         "summary": "Send one message; stream the turn back as SSE",
-        "description": "Runs one turn of the graph (guard → intent → reason → generate → output_guard, or → refuse). `chat_id: null` starts a new chat titled from this message; a known id continues that chat and moves it to the top; an unknown id is refused with 404 before any streaming, so client text never becomes a database key. Each turn's run (prompt, trace lines, totals or error) is saved with the chat, even if the client disconnects mid-answer.",
+        "description": "Runs one turn of the graph (before_model → intent → reason → generate → after_model, or → refuse). `chat_id: null` starts a new chat titled from this message; a known id continues that chat and moves it to the top; an unknown id is refused with 404 before any streaming, so client text never becomes a database key. Each turn's run (prompt, trace lines, totals or error) is saved with the chat, even if the client disconnects mid-answer.",
         "requestBody": {
           "required": true,
           "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ChatRequest" } } }
         },
         "responses": {
           "200": {
-            "description": "The turn as a stream of SSE blocks. Order: `start` (once, first) → `trace` (one per node) and `token` (answer text as it streams) → `replace` (only if the output guard retracted the answer) → `done` (once, last). On an exception after `start`, `error` replaces `done` and ends the stream.",
+            "description": "The turn as a stream of SSE blocks. Order: `start` (once, first) → `trace` (one per hook point/node) and `token` (answer text as it streams) → `replace` (only if after_model retracted the answer) → `done` (once, last). On an exception after `start`, `error` replaces `done` and ends the stream.",
             "x-sse-events": ["start", "trace", "token", "replace", "error", "done"],
             "content": {
               "text/event-stream": {
                 "schema": { "$ref": "#/components/schemas/SseEvent" },
-                "example": "event: start\ndata: {\"chat_id\": \"3f2a9c1e5b7d4e8a9c217d4e5f6a8b90\", \"title\": \"Plan a cozy weekend\"}\n\nevent: trace\ndata: {\"stage\": \"guard\", \"status\": \"ok\", \"detail\": \"pass · 19 chars · classifier 0.01\", \"ms\": 12, \"input_tokens\": 0, \"output_tokens\": 0, \"cost_usd\": 0.0}\n\nevent: token\ndata: {\"text\": \"Here \"}\n\nevent: done\ndata: {\"input_tokens\": 610, \"output_tokens\": 59, \"cost_usd\": 0.000905, \"ms\": 2140}\n\n"
+                "example": "event: start\ndata: {\"chat_id\": \"3f2a9c1e5b7d4e8a9c217d4e5f6a8b90\", \"title\": \"Plan a cozy weekend\"}\n\nevent: trace\ndata: {\"stage\": \"before_model\", \"status\": \"ok\", \"detail\": \"pass · 19 chars · rules ok · classifier 0.01\", \"ms\": 12, \"input_tokens\": 0, \"output_tokens\": 0, \"cost_usd\": 0.0}\n\nevent: token\ndata: {\"text\": \"Here \"}\n\nevent: done\ndata: {\"input_tokens\": 610, \"output_tokens\": 59, \"cost_usd\": 0.000905, \"ms\": 2140}\n\n"
               }
             }
           },
@@ -219,8 +219,8 @@
       },
       "TraceStage": {
         "type": "string",
-        "description": "Which graph node wrote the line (contracts.md § 6).",
-        "enum": ["guard", "intent", "reason", "generate", "output_guard", "refuse"]
+        "description": "Which graph node wrote the line (contracts.md § 6). `guard`/`output_guard` are saved before #32 (the hooks redesign); new turns write `before_model`/`after_model`.",
+        "enum": ["before_model", "intent", "reason", "generate", "after_model", "refuse", "guard", "output_guard"]
       },
       "TraceStatus": {
         "type": "string",

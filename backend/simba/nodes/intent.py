@@ -16,7 +16,7 @@ that wrapper and have the model treat whatever follows as a fresh instruction. S
 any user_message tag already present in the text is neutralised with `common.neutralise_tag` — its
 opening "<" is escaped to "&lt;" so it reads as plain text, not as a tag.
 
-#8: when the guard's local classifier flagged this message (`state["flag"]`, set in nodes/guard.py),
+#8: when the local classifier flagged this message (`state["flag"]`, set in nodes/hook_points.py),
 a short note is appended to the system prompt below so this node's judgement call can take that
 extra signal into account. Only Simba's own words and the flag string (e.g. "classifier 0.97") are
 added — never user text — so the note itself can't be hijacked by anything the user wrote.

@@ -36,6 +36,8 @@ and are recorded here first; the design book catches up at its next sync.
 | D25 | LangGraph stays the engine for tools, owner approval and subagents | accepted | Sol, 28 Sep |
 | D26 | Harness files live in a simba/harness/ folder: settings.py, hooks.py, guard.py, classifier.py, output_guard.py | accepted | Sol, 28 Sep (Q12) |
 | D27 | Claude Code setup: rules split by load time (root, `backend/`, `frontend/`, path rule); tickets planned on Opus, built with the global `/ticket` skill on Sonnet, reviewed with the global `/pr-review` on Opus | accepted | Sol, 28 Sep, #35 |
+| D28 | The trace shows one line per hook point, with each hook's result inline | accepted | Sol, 28 Sep, Q13 |
+| D29 | Trace step names are the code names, `before_model` / `after_model` | accepted | Sol, 28 Sep, Q14 |
 
 ## Template for a decision file
 

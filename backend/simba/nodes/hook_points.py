@@ -1,0 +1,90 @@
+"""
+nodes/hook_points.py — the graph's hook-point nodes: before_model and after_model (#32, D22/D29),
+replacing nodes/guard.py and nodes/output_guard.py.
+
+Where it sits: START -> before_model (contracts.md § 8, was "guard") runs before intent or any model
+call; after generate, after_model (was "output_guard") checks the finished reply. Both nodes are thin
+LangGraph glue: they read the hook lists `harness/settings.py` decides, hand them to
+`harness.hooks.run_hooks`, and turn the results into what the rest of the graph reads —
+before_model's Verdict/flag (simba/state.py) keeps the same shape `nodes/guard.py` used to write, so
+`after_guard`/`after_intent` (graph.py) and `intent.py` (§ 7.4) don't change; after_model's retraction
+(an AIMessage replacing the answer by id) is exactly what the old output_guard node did.
+"""
+
+from langchain_core.messages import AIMessage, BaseMessage
+
+from simba.common import text_of
+from simba.harness.classifier import InjectionClassifier
+from simba.harness.hooks import run_hooks
+from simba.harness.output_guard import RETRACT_TEXT
+from simba.harness.settings import AFTER_MODEL, before_model_hooks
+from simba.state import ChatState
+
+
+def _newest_human_text(messages: list[BaseMessage]) -> str:
+    """The text of the newest human message in `messages` (same helper the old guard node used:
+    before_model runs right after the user's turn is added, so this is normally the last message —
+    scanning from the end keeps it correct even if a later step changes what follows it)."""
+    for message in reversed(messages):
+        if message.type == "human":
+            return text_of(message)
+    return ""
+
+
+def make_before_model(classifier: InjectionClassifier | None = None):
+    """Build the before_model node, bound to `settings.before_model_hooks(classifier)` (#32, D22).
+
+    Args:
+        classifier: the local injection classifier (#8), or None; passed straight through to
+                    `before_model_hooks`, same as the old guard node's factory argument.
+
+    Returns an async node `before_model(state) -> dict` that:
+      1. Finds the newest human message's text.
+      2. Runs the hooks through `run_hooks("before_model", ...)` — one trace line for the whole
+         point (D28/D29), stopping at the first block.
+      3. A block -> Verdict "blocked" naming that hook's rule and reason (the same shape
+         `nodes/guard.py` wrote, so `refuse` and `intent` need no change).
+      4. No block -> Verdict "pass". Any hooks that flagged (never block, D15) have their rules
+         joined with "; " into `state["flag"]` — several hooks could flag at once, where the old
+         guard only ever had one (the classifier); `intent.py` reads whatever ends up there unchanged.
+    """
+    hooks = before_model_hooks(classifier)
+
+    async def before_model(state: ChatState) -> dict:
+        # 1.
+        text = _newest_human_text(state["messages"])
+        # 2.
+        results = await run_hooks("before_model", hooks, text)
+
+        # 3.
+        blocked = next((r for r in results if r.action == "block"), None)
+        if blocked is not None:
+            return {"verdict": {"status": "blocked", "rule": blocked.rule, "reason": blocked.reason}}
+
+        # 4.
+        verdict = {"status": "pass", "rule": None, "reason": " · ".join(r.reason for r in results)}
+        flags = [r.rule for r in results if r.action == "flag"]
+        if flags:
+            return {"verdict": verdict, "flag": "; ".join(flags)}
+        return {"verdict": verdict}
+
+    return before_model
+
+
+async def after_model(state: ChatState) -> dict:
+    """Check the newest reply against `settings.AFTER_MODEL`; retract it if a hook blocks (#15, #32).
+
+    1. Take the reply generate just wrote (the newest message).
+    2. Run the hooks through `run_hooks("after_model", ...)` — one trace line for the point.
+    3. No block -> {} (no state change). A block -> RETRACT_TEXT under the SAME message id, so
+       LangGraph's `add_messages` reducer replaces the answer in the saved history instead of
+       appending — exactly what the old output_guard node did.
+    """
+    # 1.
+    answer = state["messages"][-1]
+    # 2.
+    results = await run_hooks("after_model", AFTER_MODEL, text_of(answer))
+    # 3.
+    if not any(r.action == "block" for r in results):
+        return {}
+    return {"messages": [AIMessage(RETRACT_TEXT, id=answer.id)]}

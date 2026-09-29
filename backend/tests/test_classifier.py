@@ -12,7 +12,7 @@ model isn't downloaded.
 
 import pytest
 
-from simba.classifier import MODEL_DIR, THRESHOLD, OnnxInjectionClassifier, load_classifier, score_windows, split_windows
+from simba.harness.classifier import MODEL_DIR, THRESHOLD, OnnxInjectionClassifier, load_classifier, score_windows, split_windows
 
 
 class TestWindowing:
@@ -46,14 +46,14 @@ def test_load_classifier_returns_none_when_files_are_missing(tmp_path, monkeypat
     """`load_classifier` must never download on its own (contracts.md § 7.1b): pointed at an empty
     directory (via MODEL_DIR, monkeypatched so no real files or network are touched), it returns None
     instead of trying to fetch anything."""
-    monkeypatch.setattr("simba.classifier.MODEL_DIR", tmp_path)
+    monkeypatch.setattr("simba.harness.classifier.MODEL_DIR", tmp_path)
     assert load_classifier() is None
 
 
 _MODEL_ON_DISK = (MODEL_DIR / "onnx" / "model.onnx").exists() and (MODEL_DIR / "onnx" / "tokenizer.json").exists()
 
 
-@pytest.mark.skipif(not _MODEL_ON_DISK, reason="model not downloaded: run `uv run python -m simba.classifier` first")
+@pytest.mark.skipif(not _MODEL_ON_DISK, reason="model not downloaded: run `uv run python -m simba.harness.classifier` first")
 class TestRealModel:
     """Runs the actual downloaded ONNX model (no fakes anywhere) end to end: tokenizing, windowing,
     the ONNX session, the hand-rolled softmax, and reading the INJECTION label's index from the

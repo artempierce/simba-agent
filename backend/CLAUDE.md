@@ -11,5 +11,6 @@ Loaded only when a session works in `backend/`. Root rules still apply.
 - Untrusted text going into a prompt: wrap it in tags and escape it with `common.neutralise_tag`.
 - Every node reports through `common.emit_trace`; a step missing from the trace panel isn't done.
 - API change → update `specs/api-spec.json` (`tests/test_api_spec.py` catches drift).
-- Harness redesign (#32/#33) moves the guard, classifier and output guard into `simba/harness/`;
-  follow `docs/design.html` § Harness until it lands.
+- Harness redesign: #32 moved the guard, classifier and output guard into `simba/harness/` as hooks
+  (`hooks.py`, `settings.py`, `nodes/hook_points.py`). #33 (next) replaces intent/reason/generate with
+  one agent node.
