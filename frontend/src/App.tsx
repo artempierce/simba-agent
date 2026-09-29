@@ -194,16 +194,17 @@ export default function App() {
   }
 
   /**
-   * Delete a chat and drop it from the sidebar list. Ignored if it's the open chat and a stream is
-   * still running (checked via the refs, not the `busy`/`chatId` closures, which could be stale by
-   * the time this runs); otherwise, deleting the open chat resets the view to a new, unsaved chat —
-   * unless a stream started for it while the delete was in flight, in which case that's left alone.
+  * Delete a chat and drop it from the sidebar list. Ignored if it's the open chat and a stream is
+  * still running (checked via refs, not potentially stale closures). A successful delete also
+  * invalidates a pending load for that chat, so its late response cannot reopen the deleted chat.
+  * Deleting the open chat resets the view unless a stream started while deletion was in flight.
    */
   async function deleteChatById(id: string) {
     if (busyRef.current && id === chatIdRef.current) return
     chatsSeqRef.current++ // invalidate any in-flight refreshChats; our own update below is final
     try {
       await deleteChat(id)
+      if (requestedChatRef.current === id) requestedChatRef.current = null
       setChats((cs) => cs.filter((c) => c.id !== id))
       if (id === chatIdRef.current && !busyRef.current) newChat()
     } catch (e) {

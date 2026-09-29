@@ -12,6 +12,8 @@ after_model's retraction (an AIMessage replacing the answer by id) is exactly wh
 output_guard node did.
 """
 
+from collections.abc import Sequence
+
 from langchain_core.messages import AIMessage, BaseMessage
 
 from simba.common import text_of
@@ -22,7 +24,7 @@ from simba.harness.settings import AFTER_MODEL, before_model_hooks
 from simba.state import ChatState
 
 
-def _newest_human_text(messages: list[BaseMessage]) -> str:
+def _newest_human_text(messages: Sequence[BaseMessage]) -> str:
     """The text of the newest human message in `messages` (same helper the old guard node used:
     before_model runs right after the user's turn is added, so this is normally the last message —
     scanning from the end keeps it correct even if a later step changes what follows it)."""
@@ -65,7 +67,7 @@ def make_before_model(classifier: InjectionClassifier | None = None):
 
         # 4.
         verdict = {"status": "pass", "rule": None, "reason": " · ".join(r.reason for r in results)}
-        flags = [r.rule for r in results if r.action == "flag"]
+        flags = [r.rule for r in results if r.action == "flag" and r.rule is not None]
         if flags:
             return {"verdict": verdict, "flag": "; ".join(flags)}
         return {"verdict": verdict}

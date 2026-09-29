@@ -10,6 +10,7 @@ So the node doesn't know about HTTP or the UI — it just reports what it did.
 
 import re
 import time
+from collections.abc import Sequence
 
 from langchain_core.messages import BaseMessage
 from langgraph.config import get_stream_writer
@@ -54,7 +55,7 @@ def tokens_used(message: BaseMessage) -> tuple[int, int]:
     return usage.get("input_tokens", 0), usage.get("output_tokens", 0)
 
 
-def recent(messages: list[BaseMessage], limit: int) -> list[BaseMessage]:
+def recent(messages: Sequence[BaseMessage], limit: int) -> list[BaseMessage]:
     """The last `limit` messages, trimmed so the window starts with a human message.
 
     Why trim: Claude's API expects a conversation to start with the user's turn. Cutting the history

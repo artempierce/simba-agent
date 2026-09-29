@@ -170,8 +170,8 @@ generate (D21).
 2. Prompt: `[SystemMessage(system_text), *recent(state["messages"], 20)]` — no `<user_message>`
    wrapper any more; the agent sees the real recent history, not just the newest message.
 3. `reply = await model.bind_tools([ReportUnsafe]).ainvoke(prompt)` — the tool is bound but never
-   forced (unlike the deleted nodes' `with_structured_output(..., tool_choice="any")`); LangGraph
-   streams the reply's text tokens to the browser as they arrive (§ 9).
+  forced (unlike the deleted nodes' `with_structured_output(..., tool_choice="any")`). LangGraph
+  emits text chunks, which the API holds until `after_model` approves the full reply (§ 9).
 4. Read `reply.tool_calls`: no `ReportUnsafe` call → plain answer, `{"messages": [reply]}`, trace
    `ok`, detail `answer · {output_tokens} tokens out`. A `ReportUnsafe` call → NOT appended to
    `messages` (the reply is not saved); `{"verdict": {"status": "blocked", "rule":
@@ -230,9 +230,9 @@ classifier as above, and stores `app.state.graph`, `app.state.checkpointer` (and
 |---|---|---|
 | `start` | `{"chat_id": str, "title": str}` | first; new chat when `chat_id` is null (uuid4 hex; title per § 10) |
 | `trace` | § 6 event | each node |
-| `token` | `{"text": str}` | answer text as it streams |
+| `token` | `{"text": str}` | answer chunks, sent only after the full reply passes `after_model` |
 | `error` | `{"message": str}` | an exception; then the stream ends |
-| `replace` | `{"text": str}` | #15: the output guard retracted the answer, or #33: the agent's own `report_unsafe` fired after already streaming some text; sent after the tokens, just before `done`. The page swaps the whole reply for `text` |
+| `replace` | `{"text": str}` | #15: `after_model` retracted the buffered answer; no unsafe answer chunks were sent. The page swaps the empty reply bubble for `text` just before `done` |
 | `done` | `{"input_tokens", "output_tokens", "cost_usd", "ms"}` | last; totals summed from trace events |
 
 Chats (step 6): `chat_id: null` creates the chat row (title per § 10); a known id is touched (moves to
@@ -244,12 +244,11 @@ with `error = "interrupted before the reply finished"`.
 SSE framing: `event: {name}\ndata: {json}\n\n`. Run with
 `graph.astream(input, {"configurable": {"thread_id": chat_id}}, stream_mode=["messages", "custom"])`.
 Forward `custom` chunks as `trace`. Forward `messages` chunks as `token` **only** when
-`metadata["langgraph_node"] == "agent"` and the content is non-empty (a `report_unsafe` call streams
-as tool-call chunks, not answer text). If no token was sent by the end (e.g. the refuse node, which
-calls no model), send the newest AI message's full text as one `token` before `done`. If the agent's
-`report_unsafe` fires *after* it already streamed some text, send `replace` with `REFUSAL_TEXT` too
-(§ "Event" table) — a typical `report_unsafe` writes nothing first, so it never streams a token and
-needs no `replace`.
+`metadata["langgraph_node"] == "agent"` and the content is non-empty. Buffer those chunks until the
+graph finishes: if `after_model` passed, send the chunks as `token` events; if it blocked, discard
+them and send `replace` with `RETRACT_TEXT`. This prevents secrets or prompt text from reaching the
+browser before the output guard can inspect the complete answer. A `report_unsafe` call has no answer
+chunks; send the newest refusal AI message as one `token` fallback before `done`.
 
 ## § 10 Chats (`simba/chats.py`, `simba/chats_api.py`) — step 6
 
