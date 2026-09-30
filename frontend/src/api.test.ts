@@ -39,6 +39,7 @@ function recordingHandlers() {
     onTrace: record('trace'),
     onToken: record('token'),
     onReplace: record('replace'),
+    onMemory: record('memory'),
     onError: record('error'),
     onDone: record('done'),
   }
@@ -136,5 +137,17 @@ describe('streamChat', () => {
     const second = recordingHandlers()
     await streamChat('hi', null, second.handlers)
     expect(second.calls).toEqual([['error', 'The server returned 500.']])
+  })
+
+  /** #81: a `memory` event reaches onMemory with the whole saved-fact payload, before `done`. */
+  it('passes a memory event to onMemory', async () => {
+    const event = { action: 'added', fact_id: 4, kind: 'user', text: 'Mostly works in Python', previous_text: null }
+    fakeStream([sse('memory', event) + sse('done', {})])
+    const { calls, handlers } = recordingHandlers()
+    await streamChat('hi', null, handlers)
+    expect(calls).toEqual([
+      ['memory', event],
+      ['done', {}],
+    ])
   })
 })

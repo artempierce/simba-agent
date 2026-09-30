@@ -10,7 +10,7 @@
  * (it sends a message body). So instead we read the response body as a stream and split
  * Server-Sent Events (SSE) out of it ourselves.
  */
-import type { RunSummary, TraceLine } from './types'
+import type { MemoryEvent, RunSummary, TraceLine } from './types'
 
 /** Callbacks streamChat calls as the backend's SSE events arrive (docs/contracts.md § 9). */
 export type ChatHandlers = {
@@ -19,6 +19,8 @@ export type ChatHandlers = {
   onToken: (text: string) => void
   // The output guard (#15) retracted the answer: swap everything streamed so far for `text`.
   onReplace: (text: string) => void
+  // #81: the remember tool saved a fact; the reply shows it with an Undo.
+  onMemory: (event: MemoryEvent) => void
   onError: (message: string) => void
   onDone: (summary: RunSummary) => void
 }
@@ -47,6 +49,7 @@ function dispatchEvent(block: string, handlers: ChatHandlers): boolean {
   else if (name === 'trace') handlers.onTrace(payload)
   else if (name === 'token') handlers.onToken(payload.text)
   else if (name === 'replace') handlers.onReplace(payload.text)
+  else if (name === 'memory') handlers.onMemory(payload)
   else if (name === 'error') {
     handlers.onError(payload.message)
     return true

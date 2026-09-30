@@ -16,6 +16,7 @@ Key ideas:
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 
 import aiosqlite
@@ -38,6 +39,39 @@ MAX_FACTS = 200
 CORE_PROFILE_LIMIT = 15
 
 _COLUMNS = ("id", "kind", "text", "why", "source_chat_id", "created_at", "updated_at")
+
+# #81: two facts of the same kind sharing at least this share of their key words are "the same fact
+# said again" — `remember` updates the old one instead of adding a copy. 0.6 catches rewordings like
+# "Works mostly in Python" vs "Mostly works in Python 3" without merging different facts.
+DUPLICATE_OVERLAP = 0.6
+
+# Short, common words that say nothing about a fact's content; left out when comparing facts.
+_STOPWORDS = frozenset(
+    "the a an and or but of to in on at for with from by as is are was were be been am i me my mine "
+    "you your he she they them their it its this that these those we our us do does did not no yes "
+    "so very really just about into over also than then there here have has had will would can could "
+    "should like likes want wants".split()
+)
+
+
+def key_words(text: str) -> set[str]:
+    """The words that carry a text's meaning, cut to their first 5 letters so "works" and "working"
+    compare equal (a cheap stand-in for proper word stemming).
+
+    Example: key_words("Sol mostly works in Python") -> {"sol", "mostl", "works", "pytho"}
+    """
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    return {w[:5] for w in words if w not in _STOPWORDS and len(w) > 1}
+
+
+def overlap(a: set[str], b: set[str]) -> float:
+    """Share of the smaller set's words that the two sets have in common (0.0 when either is empty).
+
+    Example: overlap({"python", "works"}, {"python", "works", "mostl"}) -> 1.0
+    """
+    if not a or not b:
+        return 0.0
+    return len(a & b) / min(len(a), len(b))
 
 
 def _now() -> str:
@@ -110,6 +144,26 @@ class MemoryStore:
         )
         await self._db.commit()
         return await self.get_fact(cursor.lastrowid)
+
+    async def remember(self, kind: str, text: str, why: str | None = None,
+                       source_chat_id: str | None = None) -> tuple[dict, str, str | None]:
+        """Save a fact the agent decided to keep (#81): add it, or update a near-duplicate.
+
+        Returns (fact, action, previous_text): action is "added" or "updated"; previous_text is the
+        old wording of an updated fact (the page's Undo puts it back), None for an added one.
+
+        1. Look for a fact of the same kind whose key words overlap by DUPLICATE_OVERLAP or more.
+        2. Found: rewrite it with the new text (the newest wording wins). Otherwise add a new fact.
+        The size limits and MAX_FACTS apply either way (add_fact / update_fact enforce them).
+        """
+        # 1.
+        new_words = key_words(text)
+        for fact in await self.list_facts(kind):
+            if overlap(new_words, key_words(fact["text"])) >= DUPLICATE_OVERLAP:
+                # 2. The same fact said again: keep one, in the newest wording.
+                updated = await self.update_fact(fact["id"], text=text, why=why)
+                return updated, "updated", fact["text"]
+        return await self.add_fact(kind, text, why, source_chat_id), "added", None
 
     async def update_fact(self, fact_id: int, kind: str | None = None, text: str | None = None, why: str | None = None) -> dict | None:
         """Change any of a fact's kind, text or why; bumps updated_at. None if the fact doesn't exist."""

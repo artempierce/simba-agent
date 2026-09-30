@@ -7,7 +7,7 @@
 
 /** One line in the trace panel: what one graph node did (backend: common.emit_trace). */
 export type TraceLine = {
-  stage: string // before_model | agent | after_model | refuse | budget (intent | reason | generate on older chats)
+  stage: string // before_model | agent | before_tool | web_search | after_tool | remember | after_model | refuse | budget (intent | reason | generate on older chats)
   // (guard/output_guard on chats saved before #32; echo in step 1)
   status: 'ok' | 'blocked' | 'error' | 'flagged' // flagged (#8): passed, but the classifier raised a flag
   detail: string
@@ -25,7 +25,12 @@ export type Run = { prompt: string; lines: TraceLine[]; summary?: RunSummary; er
 
 /** One chat bubble. `error` is set when streaming the reply failed (a network/HTTP failure or a
  * mid-stream `error` event) — shown in the bubble instead of, or alongside, whatever text streamed. */
-export type Message = { role: 'user' | 'assistant'; content: string; error?: string }
+export type Message = {
+  role: 'user' | 'assistant'
+  content: string
+  error?: string
+  memories?: RememberedFact[] // #81: facts the reply saved, shown as "Remembered: … · Undo"
+}
 
 /** What the server runs with, from GET /api/info (#57): shown in the header pill. */
 export type ServerInfo = { model: string; web_search: boolean; chat_budget_usd: number }
@@ -43,6 +48,18 @@ export type Fact = {
   created_at: string
   updated_at: string
 }
+
+/** The SSE `memory` event (#81): the remember tool saved a fact while writing a reply. */
+export type MemoryEvent = {
+  action: 'added' | 'updated' // a new fact, or a near-duplicate rewritten in the new words
+  fact_id: number
+  kind: FactKind
+  text: string
+  previous_text: string | null // an updated fact's old wording, which Undo puts back
+}
+
+/** A saved fact as the reply shows it; `undone` once you clicked Undo. */
+export type RememberedFact = MemoryEvent & { undone?: boolean }
 
 /** One chat in the sidebar (step 6). Times are ISO 8601 UTC strings. */
 export type Chat = { id: string; title: string; created_at: string; updated_at: string }

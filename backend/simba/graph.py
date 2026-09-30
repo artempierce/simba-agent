@@ -86,6 +86,7 @@ def build_graph(
     classifier: InjectionClassifier | None = None,
     web_search_tool: BaseTool | None = None,
     load_profile: Callable[[], Awaitable[list[str]]] | None = None,
+    remember_tool: BaseTool | None = None,
 ) -> CompiledStateGraph:
     """Build and compile Simba's graph.
 
@@ -101,6 +102,8 @@ def build_graph(
             `ReportUnsafe` are exposed to the model; None means web search is unavailable.
         load_profile: reads the saved `user` facts for the agent's prompt (#80); api.py passes
             MemoryStore.core_profile. None means no memory (tests, or a graph built without it).
+        remember_tool: the `remember` tool (#81, tools/remember.py) that saves facts; it joins
+            web_search in the same tool loop and passes the same before_tool checks.
 
     Returns: a compiled graph, ready for `.astream(...)` / `.ainvoke(...)`.
 
@@ -119,7 +122,7 @@ def build_graph(
     graph = StateGraph(ChatState)
     # 1. Nodes.
     graph.add_node("before_model", make_before_model(classifier))
-    tools = [web_search_tool] if web_search_tool is not None else []
+    tools = [t for t in (web_search_tool, remember_tool) if t is not None]
     graph.add_node("agent", agent_node.make_node(model, tools, load_profile))
     graph.add_node("after_model", after_model)
     graph.add_node("refuse", refuse)

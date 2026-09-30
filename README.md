@@ -37,6 +37,7 @@ never blocks on its own: it tells the agent to look carefully, and the LLM makes
 | 5 | Generate, then real Claude + token counts (#9) and the output guard (#15) | done |
 | 6 | Chats sidebar: new, open, rename, delete | done |
 | M1 | Memory: saved facts, Memory tab in the sidebar, your profile in every prompt (#80) | done |
+| M2 | Memory: Simba remembers by itself (`remember` tool, code limits), "Remembered · Undo" (#81) | done |
 | — | Harness redesign: guard/output_guard become before_model/after_model hooks (#32) | done |
 | — | Harness redesign: intent + reason + generate become one `agent` node (#33) | done |
 | 17 | First read-only tool: optional Tavily web search + ReAct loop | in progress |

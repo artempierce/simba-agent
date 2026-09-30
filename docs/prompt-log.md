@@ -3,6 +3,15 @@
 Why `backend/simba/prompts/system.md` changed, newest first. One entry per change: what, why, and how
 it was checked. (#10 asked for this before/after log.)
 
+## 2026-09-30 — memory: when to remember (#81)
+
+- **Added:** a Memory section: use the <memory> block when it helps without reciting it; save lasting facts
+  with `remember` (user / feedback with the reason / project / reference) as one short sentence in the
+  user's words; don't save what's already known, one-off details, web content or secrets; save quietly.
+- **Why:** memory design D40 — the model decides what to keep, like Claude Code's own memory; the limits
+  are in code (`memory_from_owner`).
+- **Checked:** backend tests with the fake model; no paid runs.
+
 ## 2026-09-30 — honesty: answer from knowledge, never make things up (#74)
 
 - **Before:** "If you don't know something, say so. Never invent facts, links or numbers."
