@@ -63,6 +63,14 @@ def make_model() -> BaseChatModel:
     return ChatAnthropic(model=MODEL_ID, max_tokens=MAX_TOKENS)
 
 
+def model_name(model: BaseChatModel) -> str:
+    """The model's name as shown in the UI (#57): e.g. "claude-haiku-4-5", or "fake" for FakeChatModel.
+
+    ChatAnthropic keeps its model id in `.model`; the fake has no such field.
+    """
+    return getattr(model, "model", None) or "fake"
+
+
 def cost_usd(input_tokens: int, output_tokens: int) -> float:
     """Dollar cost of one call at PRICE_PER_MTOK.
 

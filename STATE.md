@@ -17,6 +17,7 @@ None open — next items need the owner's input before they can be planned (see 
 - #39 subagents (needs owner answers) · #13 / #14 memory designs
 
 ## Recently done
+#57 header pill: model + web search on/off from `GET /api/info` ·
 #54 web-search eval: 30 rubric cases, code graders + Opus judge, record/replay search ·
 #52 fresher search: today's date in the prompt, `topic`/`time_range` per search, query + filters in the trace ·
 #50 fix: trace panel's sr-only labels no longer stretch the page (empty scroll) ·

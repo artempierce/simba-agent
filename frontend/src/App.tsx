@@ -23,14 +23,15 @@
  */
 import { useEffect, useRef, useState } from 'react'
 import { streamChat } from './api'
-import { deleteChat, getChat, listChats, renameChat } from './chatsApi'
+import { deleteChat, getChat, getInfo, listChats, renameChat } from './chatsApi'
 import { ChatView } from './components/ChatView'
+import { InfoPill } from './components/InfoPill'
 import { MobileDrawer } from './components/MobileDrawer'
 import { Sidebar } from './components/Sidebar'
 import { SimbaAvatar } from './components/SimbaAvatar'
 import { TracePanel } from './components/TracePanel'
 import { moodFor } from './mood'
-import type { Chat, Message, Run } from './types'
+import type { Chat, Message, Run, ServerInfo } from './types'
 
 export default function App() {
   const [chatId, setChatId] = useState<string | null>(null) // null = a new, unsaved chat
@@ -40,6 +41,7 @@ export default function App() {
   const [chats, setChats] = useState<Chat[]>([]) // the sidebar's chat list
   const [chatsError, setChatsError] = useState<string | null>(null) // last chatsApi failure, shown in a banner
   const [drawerOpen, setDrawerOpen] = useState(false) // mobile-only overlay showing the Sidebar
+  const [info, setInfo] = useState<ServerInfo | null>(null) // model + search on/off for the header pill (#57)
 
   // See the file header comment: these mirror state for async handlers to re-check after an await.
   const busyRef = useRef(false)
@@ -82,6 +84,12 @@ export default function App() {
   useEffect(() => {
     // oxlint-disable-next-line react/set-state-in-effect -- setState only runs after an await, never synchronously
     refreshChats()
+  }, [])
+
+  // Load the server's setup once, for the header pill (#57). A failure is ignored on purpose: the
+  // pill is a hint, so the header simply shows without it.
+  useEffect(() => {
+    getInfo().then(setInfo, () => {})
   }, [])
 
   // The two helpers below change only the *last* item in their list — the run or reply currently
@@ -241,6 +249,8 @@ export default function App() {
           <SimbaAvatar mood={mood} size={32} />
           <span className="font-serif text-xl font-semibold tracking-tight text-ink">Simba</span>
         </div>
+        <InfoPill info={info} />
+        <div className="flex-1" />
         <button
           type="button"
           onClick={() => setDrawerOpen(true)}

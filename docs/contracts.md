@@ -269,6 +269,8 @@ classifier as above, and stores `app.state.graph`, `app.state.checkpointer` (and
 `app.state.chats`).
 
 - `GET /api/health` → `{"ok": true}`.
+- `GET /api/info` → `{"model": str, "web_search": bool, "chat_budget_usd": float}` (#57): `model_name(chat_model)`
+  (`"fake"` for the fake model), whether a search tool was built, and `CHAT_BUDGET_USD`.
 - `POST /api/chat`, body `{"message": str, "chat_id": str | null}` → `text/event-stream`:
 
 | Event | Data | When |

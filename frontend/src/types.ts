@@ -27,5 +27,8 @@ export type Run = { prompt: string; lines: TraceLine[]; summary?: RunSummary; er
  * mid-stream `error` event) — shown in the bubble instead of, or alongside, whatever text streamed. */
 export type Message = { role: 'user' | 'assistant'; content: string; error?: string }
 
+/** What the server runs with, from GET /api/info (#57): shown in the header pill. */
+export type ServerInfo = { model: string; web_search: boolean; chat_budget_usd: number }
+
 /** One chat in the sidebar (step 6). Times are ISO 8601 UTC strings. */
 export type Chat = { id: string; title: string; created_at: string; updated_at: string }

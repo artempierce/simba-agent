@@ -5,7 +5,17 @@
  * `Sidebar.tsx` and `App.tsx` call these functions and get back typed data or a thrown `Error` —
  * never a raw `Response` — so callers don't each have to repeat status-checking and JSON parsing.
  */
-import type { Chat, Message, Run } from './types'
+import type { Chat, Message, Run, ServerInfo } from './types'
+
+/**
+ * What the server runs with (GET /api/info, #57): model name and whether web search is on.
+ * Lives here with the other small JSON GETs; throws on a failed response like they do.
+ */
+export async function getInfo(): Promise<ServerInfo> {
+  const res = await fetch('/api/info')
+  if (!res.ok) await throwForStatus(res)
+  return (await res.json()) as ServerInfo
+}
 
 /** All chat routes share this prefix (docs/contracts.md § 10). */
 const BASE = '/api/chats'
