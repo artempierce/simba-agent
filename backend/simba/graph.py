@@ -27,6 +27,8 @@ turned the guard/output_guard nodes into hook points, #33 merged intent/reason/g
 agent node, and #17 adds the first before_tool/tool/after_tool loop around read-only web search.
 """
 
+from collections.abc import Awaitable, Callable
+
 from langchain_core.language_models import BaseChatModel
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -83,6 +85,7 @@ def build_graph(
     checkpointer: BaseCheckpointSaver | None = None,
     classifier: InjectionClassifier | None = None,
     web_search_tool: BaseTool | None = None,
+    load_profile: Callable[[], Awaitable[list[str]]] | None = None,
 ) -> CompiledStateGraph:
     """Build and compile Simba's graph.
 
@@ -96,6 +99,8 @@ def build_graph(
                that hook off. Passed straight through to `hook_points.make_before_model`.
         web_search_tool: the optional read-only Tavily tool. If present, only this tool and
             `ReportUnsafe` are exposed to the model; None means web search is unavailable.
+        load_profile: reads the saved `user` facts for the agent's prompt (#80); api.py passes
+            MemoryStore.core_profile. None means no memory (tests, or a graph built without it).
 
     Returns: a compiled graph, ready for `.astream(...)` / `.ainvoke(...)`.
 
@@ -115,7 +120,7 @@ def build_graph(
     # 1. Nodes.
     graph.add_node("before_model", make_before_model(classifier))
     tools = [web_search_tool] if web_search_tool is not None else []
-    graph.add_node("agent", agent_node.make_node(model, tools))
+    graph.add_node("agent", agent_node.make_node(model, tools, load_profile))
     graph.add_node("after_model", after_model)
     graph.add_node("refuse", refuse)
     if tools:

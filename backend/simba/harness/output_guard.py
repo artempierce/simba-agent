@@ -45,7 +45,7 @@ SECRET = re.compile(r"sk-ant-[A-Za-z0-9_\-]{8,}|ANTHROPIC_API_KEY")
 
 # Our own delimiters from before #33's agent node (it sends plain history, no wrapper tags), opening
 # or closing, any case/spacing. Kept as a guard against a leaked older-style prompt.
-INTERNAL_TAGS = re.compile(r"<\s*(?:/\s*)?(?:user_message|intent)\b", re.IGNORECASE)
+INTERNAL_TAGS = re.compile(r"<\s*(?:/\s*)?(?:user_message|intent|memory)\b", re.IGNORECASE)
 
 # A "word" for leak matching: letters, digits and apostrophes, lowercased — so punctuation, line
 # breaks and capital letters can't hide a copied sentence.

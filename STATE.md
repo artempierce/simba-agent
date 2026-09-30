@@ -17,6 +17,7 @@ normalisation, #64 safety-eval follow-ups. Phase 2: #65 tool manifests, #66 appr
 - #39 subagents (needs owner answers) · #13 / #14 memory designs
 
 ## Recently done
+#80 memory M1: fact store, Memory tab (sidebar), core profile (≤ 15 user facts) in the prompt ·
 #77 every eval is plan-only unless `--run` (owner: no paid runs until reviewed) ·
 #74 honesty section in `system.md`: no made-up answers, false premises corrected ·
 #72 #73 DeepEval benchmark (30 cases, targets) + DeepTeam red teaming, built not run (`evals/deepeval/`) ·
@@ -51,6 +52,7 @@ redesign) · #9 real Claude + token counts in trace · #15 output guard
 | Model, cost, tokens | `model.py`; per-chat budget in `harness/settings.py` + `api.py` step 2b |
 | HTTP API / SSE | `api.py`, `chats_api.py`, `specs/api-spec.json` (checked by `tests/test_api_spec.py`) |
 | Chat storage | `chats.py` (SQLite in `data/`) |
+| Memory | `memory.py` (facts), `memory_api.py`, `nodes/agent.py` `profile_block`; frontend `MemoryPanel.tsx`, `LeftPane.tsx` |
 | Frontend | `App.tsx` (state), `api.ts` (SSE parser), `components/TracePanel.tsx`, `ChatView.tsx`; style in `docs/visual-style.md` |
 | Benchmark + red team | `evals/deepeval/` (separate uv project, HTTP black-box), `evals/benchmark_cases.yaml`, `targets.yaml` |
 | Evals (search, safety) | `evals/*_cases.yaml` (cases + rubrics), `backend/evals/` (runners, graders); results in the main checkout's `.claude/hillclimb/`; README → Evals |
