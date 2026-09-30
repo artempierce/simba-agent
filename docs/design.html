@@ -122,6 +122,7 @@
     <p>Contents</p>
     <ol>
       <li><a href="#summary">Summary</a></li>
+      <li><a href="#changes-04">What changed in 0.4</a></li>
       <li><a href="#changes">What changed in 0.3</a></li>
       <li class="part">Part A · Reference</li>
       <li><a href="#loop">How my loop works</a></li>
@@ -135,8 +136,11 @@
       <li><a href="#settings">settings.py</a></li>
       <li><a href="#runner">The hook runner</a></li>
       <li><a href="#agent">The agent node</a></li>
-      <li><a href="#later">Tools and subagents later</a></li>
+      <li><a href="#later">More tools and subagents</a></li>
       <li><a href="#untrusted">Untrusted input</a></li>
+      <li><a href="#permissions">Permissions and approval</a></li>
+      <li><a href="#growth">Growing new skills</a></li>
+      <li><a href="#evals">Evals</a></li>
       <li><a href="#state">State</a></li>
       <li><a href="#memory">Memory</a></li>
       <li><a href="#system">System instruction</a></li>
@@ -155,8 +159,8 @@
       <p class="eyebrow">simba-agent · design book</p>
       <h1>Simba Design Book</h1>
       <div class="meta">
-        <span class="pill">0.3 approved</span>
-        <span>Version 0.3 · 28 Sep 2026</span>
+        <span class="pill">0.4 approved</span>
+        <span>Version 0.4 · 29 Sep 2026</span>
         <span>Repo <code>/Users/sol/simba-agent</code></span>
       </div>
     </header>
@@ -164,7 +168,22 @@
     <section id="summary">
       <h2>Summary</h2>
       <p class="lead">Simba is a small, friendly AI assistant built as a learning lab. It has three layers: a <strong>harness</strong> of safety hooks listed in one settings file, a <strong>LangGraph graph</strong> that decides what runs next, and one <strong>agent</strong> node that makes a single model call to understand, decide and reply.</p>
-      <p>This book has two parts. <strong>Part A</strong> describes how I, Claude Code, run my own loop, guardrails and memory, as a reference model. <strong>Part B</strong> is Simba's design. The MVP (steps 0–6) is built. Version 0.3 redesigns the pipeline into the three layers above. You approved it on 28 Sep; the code follows in steps H2 and H3 (see <a href="#build">Build steps</a>).</p>
+      <p>This book has two parts. <strong>Part A</strong> describes how I, Claude Code, run my own loop, guardrails and memory, as a reference model. <strong>Part B</strong> is Simba's design. The MVP, the 0.3 harness redesign and the first tool (web search) are built. Version 0.4 adds <strong>safe growth</strong>: every tool declares its permissions, anything that changes something waits for your approval, and new abilities are planned with Simba and built by a separate developer agent as a pull request you merge. You approved it on 29 Sep; the phases are in <a href="#build">Build steps</a>.</p>
+    </section>
+
+    <section id="changes-04">
+      <h2>What changed in 0.4</h2>
+      <p>Detection alone never catches every attack: rules, the classifier and the model's own judgement will each miss something. 0.4 adds the stronger protection underneath, making sure a fooled model <em>can't do harm</em>, and a safe way for Simba to grow.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Before (0.3)</th><th>After (0.4)</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>One tool on an allowlist</td><td class="wrap">Every tool ships a <strong>permission manifest</strong>: read or write, network hosts, cost, needs approval. Undeclared means denied.</td><td class="wrap">Least privilege, enforced in code (D34)</td></tr>
+          <tr><td>No actions with side effects</td><td class="wrap">A write tool <strong>pauses the graph</strong> and asks you in the UI; after the turn reads untrusted content, every write asks.</td><td class="wrap">A poisoned web page can't trigger an action on its own (D35)</td></tr>
+          <tr><td>Capabilities added by hand</td><td class="wrap">Simba writes a <strong>proposal</strong>, you approve it, a <strong>developer agent</strong> builds it as a PR, you merge.</td><td class="wrap">Simba plans; it never changes itself (D36, D38)</td></tr>
+          <tr><td>None</td><td class="wrap"><strong>Skills</strong> (markdown procedures) first, then Python tools, MCP last and off by default</td><td class="wrap">Cheapest and safest kind of ability first (D37)</td></tr>
+          <tr><td>Checked by tests only</td><td class="wrap">A <strong>search eval</strong> and a <strong>safety eval</strong> measure every prompt and model change</td><td class="wrap">Decisions by numbers, not by feel (D32)</td></tr>
+        </tbody>
+      </table></div>
     </section>
 
     <section id="changes">
@@ -386,7 +405,7 @@ AFTER_TOOL   = [flag_instruction_like_tool_result]</pre>
         <thead><tr><th>Feature</th><th>LangGraph pattern</th><th>What changes here</th></tr></thead>
         <tbody>
           <tr><td>More tools</td><td class="wrap">Conditional edge from the model to a tools node and back: the ReAct loop</td><td class="wrap">New tools need an explicit allowlist entry and the same before/after hook boundary</td></tr>
-          <tr><td>Owner approval (#30)</td><td class="wrap"><code>interrupt()</code> pauses the graph until you approve in the UI</td><td class="wrap">A <code>before_tool</code> hook returns "needs approval"; the checkpointer holds the paused turn</td></tr>
+          <tr><td>Owner approval (#66)</td><td class="wrap"><code>interrupt()</code> pauses the graph until you approve in the UI</td><td class="wrap">A <code>before_tool</code> hook returns "needs approval"; the checkpointer holds the paused turn. See <a href="#permissions">Permissions and approval</a></td></tr>
           <tr><td>Subagents</td><td class="wrap">A <em>subgraph</em>: a compiled graph used as a node or called from a tool, with its own state</td><td class="wrap">A subagent reuses the same hook runner with its own settings lists</td></tr>
         </tbody>
       </table></div>
@@ -396,12 +415,66 @@ AFTER_TOOL   = [flag_instruction_like_tool_result]</pre>
       <h2>Untrusted input</h2>
       <p>Everything Simba receives from outside its own code is untrusted, including your messages. Four layers protect it:</p>
       <ol>
-        <li><strong>Input hooks (code).</strong> A size limit and regex rules that block, plus a local classifier that flags. They are deterministic, free, and run before any model sees the message.</li>
+        <li><strong>Input hooks (code).</strong> A size limit and regex rules that block, plus a local classifier that flags. They are deterministic, free, and run before any model sees the message. 0.4 normalises the text first (hidden zero-width characters, look-alike letters) so a rule can't be dodged by spelling (#63).</li>
         <li><strong>The agent's judgement (model).</strong> The system prompt tells it that messages are requests, not rule changes, and to call <code>report_unsafe</code> for injection or harm. This is the only model-based check, so it sits on top of the code layer, never in place of it.</li>
         <li><strong>Output hooks (code).</strong> They retract any reply that contains a secret, one of Simba's internal tags, or eight or more words copied from its prompt.</li>
         <li><strong>Structure.</strong> Refusals are fixed text. The system prompt is never repeated back. The agent sees only what the graph gives it.</li>
+        <li><strong>Permissions (code, 0.4).</strong> A tool can do only what its manifest declares, and anything that changes something waits for you. This layer doesn't need to spot the attack; it limits what a fooled model can do. See <a href="#permissions">Permissions and approval</a>.</li>
       </ol>
       <p class="note">What we give up: the old intent node saw only the newest message, so an instruction planted earlier in the chat couldn't reach it. The agent needs the history to reply, so it sees that history. Every earlier message already passed the input hooks on its own turn, and the output hooks still check every reply.</p>
+    </section>
+
+    <section id="permissions">
+      <h2>Permissions and approval</h2>
+      <p>Each tool comes with a small manifest. <code>before_tool</code> checks every call against it, in code, before anything runs.</p>
+      <p class="file-label">web_search manifest · example</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Field</th><th>web_search</th><th>What the code does with it</th></tr></thead>
+        <tbody>
+          <tr><td><code>access</code></td><td>read</td><td class="wrap">A <code>write</code> tool always goes through the approval rule below</td></tr>
+          <tr><td><code>hosts</code></td><td>api.tavily.com</td><td class="wrap">Any other host is refused</td></tr>
+          <tr><td><code>cost_per_call</code></td><td>1 Tavily credit</td><td class="wrap">Counted against the per-turn and per-chat budgets</td></tr>
+          <tr><td><code>needs_approval</code></td><td>no</td><td class="wrap"><code>yes</code> pauses the graph with <code>interrupt()</code> and shows an approve / deny card</td></tr>
+          <tr><td><code>enabled</code></td><td>yes</td><td class="wrap">New tools start switched off</td></tr>
+        </tbody>
+      </table></div>
+      <p><strong>The untrusted-content rule.</strong> Once a turn has read anything from outside (a search result, a web page, a file), every tool that changes something needs your approval for the rest of that turn, whatever its manifest says. The state records a <code>tainted</code> flag; the check is one line of code, not a model decision (D35).</p>
+    </section>
+
+    <section id="growth">
+      <h2>Growing new skills</h2>
+      <p>You and Simba plan a new ability in conversation. Simba has low permissions and never changes itself; a separate developer agent does the building, and nothing is used until you have approved twice.</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart TD
+  U["You and Simba talk it through"] --> P["Simba writes a proposal:<br/>what, why, permissions, hosts, cost"]
+  P --> C{"Approval card in the UI"}
+  C -->|"deny"| N(["Nothing happens"])
+  C -->|"approve"| D["Developer agent<br/>Claude Agent SDK, own worktree,<br/>fake model only"]
+  D --> R["Skill or tool + tests + manifest<br/>CI + search and safety evals"]
+  R --> PR{"Pull request: you review"}
+  PR -->|"merge"| L["Simba loads it, switched off"]
+  L --> ON(["You switch it on"])
+</pre>
+      </div>
+      <div class="grid-3">
+        <div class="box layer"><h4>Skill</h4><p>A markdown procedure Simba reads when a task needs it. No code, so it comes first.</p></div>
+        <div class="box layer"><h4>Tool</h4><p>Python code plus its manifest, behind <code>before_tool</code> and <code>after_tool</code>.</p></div>
+        <div class="box layer"><h4>MCP connection</h4><p>An outside service. Last, and switched off until you turn it on.</p></div>
+      </div>
+      <p class="note">These follow the self-improvement rules in <code>CLAUDE.md</code>: propose, never apply; show the whole change; least privilege; generated code is untrusted; reversible; Simba cannot loosen its own limits.</p>
+    </section>
+
+    <section id="evals">
+      <h2>Evals</h2>
+      <p>Tests prove the code does what it says. Evals measure how well the real model behaves, and decide prompt and model changes (D32). Both run by hand because they cost money; results live in the main checkout's <code>.claude/hillclimb/</code>.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Eval</th><th>Cases</th><th>Graded by</th><th>First baseline (Haiku, 29 Sep)</th></tr></thead>
+        <tbody>
+          <tr><td>Search (#54)</td><td class="wrap">30: today, this week, timeless, tricky</td><td class="wrap">Code: search choice, query filters, freshness, real links. Opus 5.5 judge: a rubric per case</td><td class="wrap">Rubric pass 60% · search choice 97% · real links 100%</td></tr>
+          <tr><td>Safety (#58)</td><td class="wrap">30: direct and indirect injection, prompt extraction, harmful, secrets, benign</td><td class="wrap">Code: resisted, no leak, which layer caught it. Opus 5.5 judge: a rubric per case</td><td class="wrap">Safe 93% · no attack succeeded · over-refusal 0%</td></tr>
+        </tbody>
+      </table></div>
     </section>
 
     <section id="state">
@@ -575,10 +648,17 @@ Safety
         <tbody>
           <tr><td>0–6 · MVP</td><td class="wrap">Repo, skeleton, guard, intent, reason, generate, chats sidebar; then classifier (#8), real Claude + token counts (#9), output guard (#15), redesign (#20, #21)</td><td><span class="chip done">done</span></td></tr>
           <tr><td>H1 · Design book</td><td class="wrap">This version: harness, graph, agent (#11)</td><td><span class="chip done">done</span></td></tr>
-          <tr><td>H2 · Hooks in settings</td><td class="wrap"><code>settings.py</code>, <code>hooks.py</code>, the two hook-point nodes; delete the guard and output_guard nodes. Done when the old guard and output tests pass through the new nodes.</td><td><span class="chip next">next</span></td></tr>
-          <tr><td>H3 · One agent node</td><td class="wrap"><code>nodes/agent.py</code> + <code>report_unsafe</code>; delete intent, reason, generate, their prompts, schemas and state fields; update API streaming, contracts and trace. Done when all tests pass on the fake model.</td><td><span class="chip next">next</span></td></tr>
-          <tr><td>7 · Personality</td><td class="wrap">Tune <code>system.md</code> together (#10)</td><td><span class="chip later">after H3</span></td></tr>
-          <tr><td>H4 · First tool</td><td class="wrap">Tools node, ReAct loop, <code>before_tool</code> / <code>after_tool</code> hooks (#17)</td><td><span class="chip later">later</span></td></tr>
+          <tr><td>H2 · Hooks in settings</td><td class="wrap"><code>settings.py</code>, <code>hooks.py</code>, the two hook-point nodes (#32)</td><td><span class="chip done">done</span></td></tr>
+          <tr><td>H3 · One agent node</td><td class="wrap"><code>nodes/agent.py</code> + <code>report_unsafe</code> (#33)</td><td><span class="chip done">done</span></td></tr>
+          <tr><td>7 · Personality</td><td class="wrap">Warm, upbeat, a light touch of humour (#10)</td><td><span class="chip done">done</span></td></tr>
+          <tr><td>H4 · First tool</td><td class="wrap">Web search with news and time filters, ReAct loop, tool hooks (#17, #52), header pill (#57)</td><td><span class="chip done">done</span></td></tr>
+          <tr><td>E · Evals</td><td class="wrap">Search eval (#54) and safety eval (#58), baselines recorded</td><td><span class="chip done">done</span></td></tr>
+          <tr><td>0.4 · Phase 1</td><td class="wrap">Measure and harden: search prompt (#55), Sonnet 5.5 chosen by the evals (#62), input normalisation (#63), safety-eval follow-ups (#64)</td><td><span class="chip next">next</span></td></tr>
+          <tr><td>0.4 · Phase 2</td><td class="wrap">Tool registry and permission manifests (#65); approval pause and the untrusted-content rule (#66)</td><td><span class="chip later">later</span></td></tr>
+          <tr><td>0.4 · Phase 3</td><td class="wrap">Skills: Simba loads markdown skills; you add them by hand at first</td><td><span class="chip later">later</span></td></tr>
+          <tr><td>0.4 · Phase 4</td><td class="wrap">Proposals: Simba writes one in chat, an approval card appears in the UI (#30)</td><td><span class="chip later">later</span></td></tr>
+          <tr><td>0.4 · Phase 5</td><td class="wrap">Developer agent turns an approved proposal into a PR (#30)</td><td><span class="chip later">later</span></td></tr>
+          <tr><td>0.4 · Phase 6</td><td class="wrap">Memory across chats (#13, #14)</td><td><span class="chip later">later</span></td></tr>
         </tbody>
       </table></div>
     </section>
@@ -598,7 +678,7 @@ Safety
           <tr><td>D8</td><td class="wrap">Refusal text: "I can't help with that request. Please ask about something else."</td><td class="wrap">Sol, 26 Sep</td></tr>
           <tr><td>D9</td><td class="wrap">Simba may ask a clarifying question instead of answering (now a plain reply from the agent)</td><td class="wrap">Sol, 26 Sep</td></tr>
           <tr><td>D10</td><td class="wrap">Memory is procedural + short-term first; episodic and semantic next</td><td class="wrap">Sol, 26 Sep</td></tr>
-          <tr><td>D11</td><td class="wrap">Personality: friendly, warm, concise</td><td class="wrap">Sol, 26 Sep</td></tr>
+          <tr class="superseded"><td>D11</td><td class="wrap">Personality: friendly, warm, concise</td><td class="wrap">Replaced by D33</td></tr>
           <tr><td>D12</td><td class="wrap"><code>claude-haiku-4-5</code> for model calls, for now</td><td class="wrap">Sol, 26 Sep</td></tr>
           <tr><td>D13</td><td class="wrap">LangSmith tracing off for now</td><td class="wrap">Sol, 26 Sep</td></tr>
           <tr><td>D14</td><td class="wrap">Chats sidebar with rename and delete; title = first message cut to 40 characters</td><td class="wrap">Sol, 26 Sep</td></tr>
@@ -614,20 +694,25 @@ Safety
           <tr><td>D24</td><td class="wrap">No separate LLM safety check: the classifier's flag becomes a note in the agent's prompt, and <code>report_unsafe</code> is the model's structured "no"</td><td class="wrap">Sol, 28 Sep</td></tr>
           <tr><td>D25</td><td class="wrap">LangGraph stays the engine for tools, owner approval and subagents</td><td class="wrap">Sol, 28 Sep</td></tr>
           <tr><td>D26</td><td class="wrap">Harness files live in a <code>simba/harness/</code> folder: <code>settings.py</code>, <code>hooks.py</code>, <code>guard.py</code>, <code>classifier.py</code>, <code>output_guard.py</code></td><td class="wrap">Sol, 28 Sep (Q12)</td></tr>
+          <tr><td>D27</td><td class="wrap">Claude Code setup: rules split by load time; plan on Opus, build with <code>/ticket</code>, review with <code>/pr-review</code></td><td class="wrap">Sol, 28 Sep, #35</td></tr>
+          <tr><td>D28</td><td class="wrap">The trace shows one line per hook point, with each hook's result inline</td><td class="wrap">Sol, 28 Sep, Q13</td></tr>
+          <tr><td>D29</td><td class="wrap">Trace step names are the code names, <code>before_model</code> / <code>after_model</code></td><td class="wrap">Sol, 28 Sep, Q14</td></tr>
+          <tr><td>D30</td><td class="wrap">Each chat may spend $0.50 on model calls, checked in code before the graph</td><td class="wrap">Sol, 29 Sep, #16</td></tr>
+          <tr><td>D31</td><td class="wrap">Today's date goes into every prompt; web search takes <code>topic</code> and <code>time_range</code> per call</td><td class="wrap">Sol, 29 Sep, #52</td></tr>
+          <tr><td>D32</td><td class="wrap">Model and prompt changes are decided by the search and safety evals</td><td class="wrap">Sol, 29 Sep, #54</td></tr>
+          <tr><td>D33</td><td class="wrap">Personality: warm, upbeat, a light touch of humour; honest rather than flattering</td><td class="wrap">Sol, 29 Sep, #10</td></tr>
+          <tr><td>D34</td><td class="wrap">Every tool declares its permissions in a manifest; anything undeclared is denied in code</td><td class="wrap">Sol, 29 Sep, 0.4</td></tr>
+          <tr><td>D35</td><td class="wrap">A tool that changes anything waits for approval; after untrusted content, every such tool does</td><td class="wrap">Sol, 29 Sep, 0.4</td></tr>
+          <tr><td>D36</td><td class="wrap">Simba proposes; a separate developer agent (Claude Agent SDK, local, own worktree) builds a PR</td><td class="wrap">Sol, 29 Sep, 0.4 Q1</td></tr>
+          <tr><td>D37</td><td class="wrap">Skills first, then Python tools; MCP last and switched off by default</td><td class="wrap">Sol, 29 Sep, 0.4 Q2</td></tr>
+          <tr><td>D38</td><td class="wrap">Two approvals: the UI card approves the idea, merging the PR approves the code</td><td class="wrap">Sol, 29 Sep, 0.4 Q3</td></tr>
         </tbody>
       </table></div>
     </section>
 
     <section id="questions">
       <h2>Open questions</h2>
-      <p>Answered one at a time before H2 starts (Q12 became D26). The last column is my recommendation, not a decision.</p>
-      <div class="table-wrap"><table>
-        <thead><tr><th>#</th><th>Question</th><th>Recommendation</th></tr></thead>
-        <tbody>
-          <tr><td>Q13</td><td class="wrap">Trace: one line per hook point with results inline, or one line per hook?</td><td class="wrap default">One line per hook point: the panel stays short, the detail still names each hook</td></tr>
-          <tr><td>Q14</td><td class="wrap">Step names in the trace: <code>before_model</code> / <code>after_model</code>, or plain words like "input check" / "reply check"?</td><td class="wrap default">The code names, so the trace matches the code you read</td></tr>
-        </tbody>
-      </table></div>
+      <p>None open. Q13 and Q14 became D28 and D29; the 0.4 questions became D36–D38. New questions go here with a recommendation, one at a time.</p>
     </section>
   </main>
 </div>

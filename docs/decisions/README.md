@@ -19,7 +19,7 @@ and are recorded here first; the design book catches up at its next sync.
 | D8 | Refusal text: "I can't help with that request. Please ask about something else." | accepted | Sol, 26 Sep |
 | D9 | Simba may ask a clarifying question instead of answering (now a plain reply from the agent) | accepted | Sol, 26 Sep |
 | D10 | Memory is procedural + short-term first; episodic and semantic next | accepted | Sol, 26 Sep |
-| D11 | Personality: friendly, warm, concise | accepted | Sol, 26 Sep |
+| D11 | Personality: friendly, warm, concise | replaced by D33 | Sol, 26 Sep |
 | D12 | claude-haiku-4-5 for model calls, for now | accepted | Sol, 26 Sep |
 | D13 | LangSmith tracing off for now | accepted | Sol, 26 Sep |
 | D14 | Chats sidebar with rename and delete; title = first message cut to 40 characters | accepted | Sol, 26 Sep |
@@ -38,6 +38,15 @@ and are recorded here first; the design book catches up at its next sync.
 | D27 | Claude Code setup: rules split by load time (root, `backend/`, `frontend/`, path rule); tickets planned on Opus, built with the global `/ticket` skill on Sonnet, reviewed with the global `/pr-review` on Opus | accepted | Sol, 28 Sep, #35 |
 | D28 | The trace shows one line per hook point, with each hook's result inline | accepted | Sol, 28 Sep, Q13 |
 | D29 | Trace step names are the code names, `before_model` / `after_model` | accepted | Sol, 28 Sep, Q14 |
+| D30 | Each chat may spend $0.50 on model calls; the check runs in code before the graph | accepted | Sol, 29 Sep, #16 |
+| D31 | Today's date goes into every prompt; web search takes `topic` and `time_range` chosen per call by the model | accepted | Sol, 29 Sep, #52 |
+| D32 | Model and prompt changes are decided by the search and safety evals (Opus 5.5 judge, a rubric per case), not by feel | accepted | Sol, 29 Sep, #54 |
+| D33 | Personality: warm, upbeat, a light touch of humour; honest rather than flattering (replaces D11) | accepted | Sol, 29 Sep, #10 |
+| D34 | Limit the damage, don't only detect: every tool declares its permissions in a manifest; anything undeclared is denied in code | accepted | Sol, 29 Sep, design 0.4 |
+| D35 | A tool that changes anything pauses for the owner's approval; once a turn has read untrusted content, every such tool needs approval | accepted | Sol, 29 Sep, design 0.4 |
+| D36 | Simba proposes; a separate developer agent (Claude Agent SDK, local, in its own worktree) builds and opens a PR | accepted | Sol, 29 Sep, design 0.4 Q1 |
+| D37 | New abilities come as skills (markdown) first, then Python tools; MCP connections last and switched off by default | accepted | Sol, 29 Sep, design 0.4 Q2 |
+| D38 | Two approvals: the UI card approves the idea, merging the PR approves the code | accepted | Sol, 29 Sep, design 0.4 Q3 |
 
 ## Template for a decision file
 
