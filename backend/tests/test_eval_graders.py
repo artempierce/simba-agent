@@ -105,3 +105,18 @@ def test_judge_prompt_fences_the_graded_text_and_gives_the_date():
     assert "<answer>\nHello\n</answer>" in prompt
     assert "(no search was made)" in prompt
     assert "1. Has three items.\n2. Every item has a link." in prompt
+
+
+def test_paid_eval_runs_need_the_run_flag():
+    """#77: an eval started without --run (and without --fake) must stop before any paid call;
+    --fake and --run both go ahead. This is what keeps a stray command from spending money."""
+    from argparse import Namespace
+
+    import pytest
+
+    from evals.run_search_eval import require_run_flag
+
+    with pytest.raises(SystemExit, match="off by default"):
+        require_run_flag(Namespace(fake=False, run=False), [{"id": "t01"}], judged=True)
+    require_run_flag(Namespace(fake=True, run=False), [], judged=False)  # free: allowed
+    require_run_flag(Namespace(fake=False, run=True), [], judged=True)   # owner said yes: allowed

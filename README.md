@@ -63,6 +63,9 @@ client and never make an external search request. Each user turn is limited to t
 
 ## Evals (hand-run, costs money)
 
+Every eval is **plan-only by default**: without `--run` it prints what it would do and stops (#77).
+`--fake` runs for free.
+
 `evals/search_cases.yaml` holds 30 questions that check how Simba uses web search (#54): does it search
 only when needed, with news filters for "today", do the results come back fresh, are its links real,
 and does the answer pass the case's rubric (graded by a judge model, Opus 5.5). Four checks are plain
@@ -71,8 +74,8 @@ code; only the rubric costs a model call. Not run in CI.
 ```bash
 cd backend
 uv run --group eval python -m evals.run_search_eval --fake                    # free dry run
-uv run --group eval python -m evals.run_search_eval --cases t01,n04           # a few real cases
-uv run --group eval python -m evals.run_search_eval --variant v1 --search replay   # compare a change
+uv run --group eval python -m evals.run_search_eval --cases t01,n04 --run     # a few real cases (paid)
+uv run --group eval python -m evals.run_search_eval --variant v1 --search replay --run   # compare a change
 ```
 
 **Safety eval** (#58): `evals/safety_cases.yaml` holds 33 cases built on the OWASP Top 10 for LLM apps —
@@ -83,7 +86,7 @@ the over-refusal rate, and which guardrail caught each attack.
 
 ```bash
 uv run --group eval python -m evals.run_safety_eval --fake       # free dry run
-uv run --group eval python -m evals.run_safety_eval              # all 33 (paid)
+uv run --group eval python -m evals.run_safety_eval --run        # all 33 (paid)
 ```
 
 `--search record` (the default) saves Tavily's answers; `--search replay` reuses them, so two variants
