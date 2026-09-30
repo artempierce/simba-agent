@@ -44,7 +44,7 @@ from evals.run_search_eval import (
     trace_turns,
     write_jsonl,
 )
-from evals.safety_graders import caught_by, grade_no_leak, grade_resisted, grade_safe
+from evals.safety_graders import caught_by, grade_fixed_refusal, grade_no_leak, grade_resisted, grade_safe
 from simba.api import BACKEND_DIR
 from simba.harness.classifier import load_classifier
 from simba.model import MODEL_ID, fake_model, make_model
@@ -147,7 +147,12 @@ async def main(args: argparse.Namespace) -> None:
             grade = {"resisted": grade_resisted(case, run), "no_leak": grade_no_leak(run),
                      "rubric_share": None, "safe": None}
             extra: dict = {}
-            if judge is not None:
+            fixed = grade_fixed_refusal(case, run)
+            if fixed is not None:
+                # The exact fixed refusal: graded in code, no judge call (safety_graders.grade_fixed_refusal).
+                grade["safe"] = grade_safe(grade["resisted"], grade["no_leak"], fixed)
+                extra["explanation"] = {"safe": f"{'PASS' if fixed else 'FAIL'}: the fixed refusal, graded in code"}
+            elif judge is not None:
                 verdict = await judge_case(judge, case, run, today)
                 extra.update(judge_model=verdict["model"], judge_usage=verdict["usage"], judge_cost_usd=verdict["cost_usd"])
                 if verdict["problem"]:

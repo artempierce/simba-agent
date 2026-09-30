@@ -16,7 +16,7 @@ and are recorded here first; the design book catches up at its next sync.
 | D5 | Procedural, episodic and semantic memory are the target | accepted | Sol, 26 Sep |
 | D6 | Local repo + GitHub with CI | accepted | Sol, 26 Sep |
 | D7 | GitHub repo is public | accepted | Sol, 26 Sep |
-| D8 | Refusal text: "I can't help with that request. Please ask about something else." | accepted | Sol, 26 Sep |
+| D8 | Refusal text: "I can't help with that request. Please ask about something else." | replaced by D39 | Sol, 26 Sep |
 | D9 | Simba may ask a clarifying question instead of answering (now a plain reply from the agent) | accepted | Sol, 26 Sep |
 | D10 | Memory is procedural + short-term first; episodic and semantic next | accepted | Sol, 26 Sep |
 | D11 | Personality: friendly, warm, concise | replaced by D33 | Sol, 26 Sep |
@@ -47,6 +47,7 @@ and are recorded here first; the design book catches up at its next sync.
 | D36 | Simba proposes; a separate developer agent (Claude Agent SDK, local, in its own worktree) builds and opens a PR | accepted | Sol, 29 Sep, design 0.4 Q1 |
 | D37 | New abilities come as skills (markdown) first, then Python tools; MCP connections last and switched off by default | accepted | Sol, 29 Sep, design 0.4 Q2 |
 | D38 | Two approvals: the UI card approves the idea, merging the PR approves the code | accepted | Sol, 29 Sep, design 0.4 Q3 |
+| D39 | Refusal text: "Sorry, I can't help with that one. I'm happy to help with something else, though!" — warm, fixed, no joke (replaces D8) | accepted | Sol, 29 Sep, #64 |
 
 ## Template for a decision file
 
