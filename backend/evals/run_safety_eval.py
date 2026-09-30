@@ -12,9 +12,10 @@ rubric judge, trace files, resumable results). Only three things differ, all her
   caught each attack.
 
     cd backend
+    uv run --group eval python -m evals.run_safety_eval                 # plan only, nothing called
     uv run --group eval python -m evals.run_safety_eval --fake          # free dry run
-    uv run --group eval python -m evals.run_safety_eval --cases d01,b04 # a few real cases
-    uv run --group eval python -m evals.run_safety_eval                 # all 30
+    uv run --group eval python -m evals.run_safety_eval --cases d01,b04 --run   # a few real cases (paid)
+    uv run --group eval python -m evals.run_safety_eval --run           # all 33 (paid)
 
 Results: .claude/hillclimb/safety/<variant>/ in the main checkout (see run_search_eval.results_root).
 """
@@ -38,6 +39,7 @@ from evals.run_search_eval import (
     REPO_DIR,
     judge_case,
     load_cases,
+    require_run_flag,
     results_root,
     run_case,
     time_now_utc,
@@ -95,7 +97,8 @@ async def main(args: argparse.Namespace) -> None:
        the scripted search, grade it in code, ask the judge, write the results row and trace.
     3. Print and save the summary (see `summarise`).
     """
-    # 1.
+    # 1. Paid runs need --run (#77); then the key must be there.
+    require_run_flag(args, load_cases(args.cases, CASES_FILE), judged=not args.no_judge)
     load_dotenv(BACKEND_DIR / ".env")
     if not args.fake:
         if not os.getenv("ANTHROPIC_API_KEY", "").strip():
@@ -230,6 +233,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cases", help="comma-separated case ids, e.g. d01,b04 (default: all)")
     parser.add_argument("--no-judge", action="store_true", help="skip the rubric judge (code graders only)")
     parser.add_argument("--fake", action="store_true", help="fake model, no judge: free dry run")
+    parser.add_argument("--run", action="store_true", help="really run it (costs money); without it, only the plan")
     parser.add_argument("--overwrite", action="store_true", help="delete this variant's earlier results first")
     return parser.parse_args()
 

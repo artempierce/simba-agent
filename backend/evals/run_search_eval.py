@@ -5,9 +5,10 @@ goes through Simba's real app, and graders.py scores what came back.
 Where it sits: outside the app and outside CI (a real run costs money). The owner runs it by hand:
 
     cd backend
+    uv run --group eval python -m evals.run_search_eval                        # plan only, nothing called
     uv run --group eval python -m evals.run_search_eval --fake                 # free dry run
-    uv run --group eval python -m evals.run_search_eval --cases t01,n04 --search record   # pilot
-    uv run --group eval python -m evals.run_search_eval --variant v1 --search replay
+    uv run --group eval python -m evals.run_search_eval --cases t01,n04 --run  # pilot (paid)
+    uv run --group eval python -m evals.run_search_eval --variant v1 --search replay --run
 
 Key ideas:
 - Real entry point: each case is one POST /api/chat on a fresh `create_app(...)` app, exactly like
@@ -269,6 +270,19 @@ def trace_turns(case: dict, outcome: dict, today: date) -> list[dict]:
 # ---- the whole run --------------------------------------------------------------------------------
 
 
+def require_run_flag(args: argparse.Namespace, cases: list[dict], judged: bool) -> None:
+    """Paid runs are opt-in (#77): without --run, say what would run and stop before any call.
+
+    --fake never costs anything, so it runs without --run. A real run costs one Simba turn per case
+    (Claude, plus Tavily in the search eval) and, unless --no-judge, one Opus judge call per case.
+    """
+    if args.fake or args.run:
+        return
+    judge = " + 1 Opus judge call" if judged else ""
+    print(f"Plan: {len(cases)} case(s), each 1 real Simba turn{judge}. Nothing was called.")
+    raise SystemExit("Paid runs are off by default. Add --run to spend money on it, or --fake for a free dry run.")
+
+
 def load_cases(only: str | None, cases_file: Path = CASES_FILE) -> list[dict]:
     """All cases from a YAML file (the search cases by default), or just the comma-separated ids in `only`."""
     cases = yaml.safe_load(cases_file.read_text())
@@ -295,7 +309,8 @@ async def main(args: argparse.Namespace) -> None:
        grade it in code, ask the judge, and write the results row and trace file.
     3. Print and save the summary (see `summarise`).
     """
-    # 1.
+    # 1. Paid runs need --run (#77); then the keys must be there.
+    require_run_flag(args, load_cases(args.cases), judged=not args.no_judge)
     load_dotenv(BACKEND_DIR / ".env")
     if not args.fake:
         for key in ("ANTHROPIC_API_KEY", "TAVILY_API_KEY"):
@@ -431,6 +446,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--search", choices=["live", "record", "replay"], default="record")
     parser.add_argument("--no-judge", action="store_true", help="skip the rubric judge (code graders only)")
     parser.add_argument("--fake", action="store_true", help="fake model, fake search, no judge: free dry run")
+    parser.add_argument("--run", action="store_true", help="really run it (costs money); without it, only the plan")
     parser.add_argument("--overwrite", action="store_true", help="delete this variant's earlier results first")
     return parser.parse_args()
 
