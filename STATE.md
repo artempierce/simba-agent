@@ -9,7 +9,7 @@ Harness redesign done (design book 0.3): hooks listed in `harness/settings.py` r
 (#32); one `agent` node replaces intent/reason/generate (#33).
 
 ## Current focus
-Design book 0.4 (safe growth, #67). Phase 1: #55 search prompt, #62 Sonnet by evals, #63 input
+Design book 0.4 (safe growth, #67). Phase 1: #62 Sonnet by evals, #63 input
 normalisation, #64 safety-eval follow-ups. Phase 2: #65 tool manifests, #66 approval pause.
 
 ## Next up (post-MVP)
@@ -18,6 +18,7 @@ normalisation, #64 safety-eval follow-ups. Phase 2: #65 tool manifests, #66 appr
 - #39 subagents (needs owner answers)
 
 ## Recently done
+#55 search prompt: "When to search" principles (merged without an eval run; owner tests by hand) ·
 #81 memory M2: `remember` tool saves facts itself (own words only, never after web results, no secrets, dedupe) + Undo ·
 #80 memory M1: fact store, Memory tab (sidebar), core profile (≤ 15 user facts) in the prompt ·
 #79 memory design: auto facts with code limits, summaries every 6 turns, hybrid recall; D40–D45 ·
