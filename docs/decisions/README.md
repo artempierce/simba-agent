@@ -48,6 +48,12 @@ and are recorded here first; the design book catches up at its next sync.
 | D37 | New abilities come as skills (markdown) first, then Python tools; MCP connections last and switched off by default | accepted | Sol, 29 Sep, design 0.4 Q2 |
 | D38 | Two approvals: the UI card approves the idea, merging the PR approves the code | accepted | Sol, 29 Sep, design 0.4 Q3 |
 | D39 | Refusal text: "Sorry, I can't help with that one. I'm happy to help with something else, though!" — warm, fixed, no joke (replaces D8) | accepted | Sol, 29 Sep, #64 |
+| D40 | Facts are saved automatically by a `remember(kind, fact, why)` tool in the agent's call, using four kinds (user, feedback, project, reference); limits live in code: only this turn's user words, never after reading web content, size cap, dedupe, trace + Undo (replaces the approve-each idea in #14) | accepted | Sol, 30 Sep, #79 Q1 |
+| D41 | Each chat keeps a rolling summary, updated every 6 turns by one model call from a fixed template | accepted | Sol, 30 Sep, #79 Q2 |
+| D42 | Recall is hybrid: an index of recent chat summaries in the prompt, plus a `recall_memory` tool that searches with local embeddings and keywords (no API cost) | accepted | Sol, 30 Sep, #79 Q3 |
+| D43 | A core profile of up to 15 `user` facts is always in the prompt; everything else is recalled on demand | accepted | Sol, 30 Sep, #79 Q4 |
+| D44 | Memory is managed in a Memory tab in the sidebar: view, add, edit, delete, delete all | accepted | Sol, 30 Sep, #79 Q5 |
+| D45 | Memory text (facts, summaries, recall results) is data inside a fenced block, never instructions | accepted | Sol, 30 Sep, #79 |
 
 ## Template for a decision file
 

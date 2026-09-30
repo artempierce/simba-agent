@@ -160,7 +160,7 @@
       <h1>Simba Design Book</h1>
       <div class="meta">
         <span class="pill">0.4 approved</span>
-        <span>Version 0.4 · 29 Sep 2026</span>
+        <span>Version 0.4 · memory added 30 Sep 2026</span>
         <span>Repo <code>/Users/sol/simba-agent</code></span>
       </div>
     </header>
@@ -495,13 +495,37 @@ flowchart TD
 
     <section id="memory">
       <h2>Memory</h2>
+      <p>Simba copies the memory design Claude Code uses (Part A): short things always loaded, the rest found when needed, and the model itself deciding what is worth keeping. Three kinds, one SQLite database.</p>
       <div class="table-wrap"><table>
-        <thead><tr><th>Type</th><th>Now</th><th>How</th></tr></thead>
+        <thead><tr><th>Kind</th><th>What it holds</th><th>Written</th><th>Read</th><th>Ticket</th></tr></thead>
         <tbody>
-          <tr><td>Procedural</td><td class="wrap">Yes</td><td class="wrap">Simba's personality and rules live in one file, <code>backend/simba/prompts/system.md</code>, loaded by the agent. The per-node prompts <code>intent.md</code> and <code>reason.md</code> are deleted.</td></tr>
-          <tr><td>Short-term</td><td class="wrap">Yes</td><td class="wrap">The chat history in the checkpointed thread.</td></tr>
-          <tr><td>Episodic</td><td class="wrap">Later (#13)</td><td class="wrap">Proposal to discuss: at the end of each chat, save a short dated summary. A new chat recalls the most relevant ones.</td></tr>
-          <tr><td>Semantic</td><td class="wrap">Later (#14)</td><td class="wrap">Proposal to discuss: extract stable facts about you from your own words and show them for approval before saving.</td></tr>
+          <tr><td>Procedural</td><td class="wrap">How Simba behaves: <code>system.md</code>; later, skills</td><td class="wrap">By a reviewed PR only</td><td class="wrap">Every turn</td><td class="wrap">done</td></tr>
+          <tr><td>Short-term</td><td class="wrap">This chat's last 20 messages</td><td class="wrap">Every turn (checkpointer)</td><td class="wrap">Every turn</td><td class="wrap">done</td></tr>
+          <tr><td>Semantic</td><td class="wrap">Facts: <code>user</code> (who you are, preferences), <code>feedback</code> (corrections, confirmed ways of working, with the why), <code>project</code> (ongoing work, dates), <code>reference</code> (pointers)</td><td class="wrap">Automatically, by the <code>remember</code> tool (D40)</td><td class="wrap">Core profile (≤ 15 <code>user</code> facts) every turn (D43); the rest via <code>recall_memory</code></td><td class="wrap">#80, #81</td></tr>
+          <tr><td>Episodic</td><td class="wrap">A rolling summary per chat: topic, decisions and what was learned, open todos, stated preferences, dates</td><td class="wrap">Every 6 turns, one model call merges the old summary with the new turns (D41)</td><td class="wrap">An index of recent summaries every turn; full text via <code>recall_memory</code> (D42)</td><td class="wrap">#82, #83</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Deciding what to remember</h3>
+      <p>There is no separate "should I save this?" step. In the same call where the agent answers, the prompt describes the four kinds and asks: will this still matter in a later chat, is it not obvious, and isn't it already known? If so, the agent calls <code>remember</code>; a similar fact is updated instead of added. This is how Claude Code keeps its own memory files.</p>
+      <p><strong>Limits in code</strong>, because automatic memory is the classic way an attack survives into later chats:</p>
+      <ul>
+        <li>Only facts from <em>your</em> words in this turn. A turn that read web results can't save anything (the untrusted-content rule, D35).</li>
+        <li>Size cap per fact and in total; a near-duplicate updates the old fact.</li>
+        <li>Every save shows in the trace and as <em>Remembered: … · Undo</em> under the reply.</li>
+        <li>Memory text reaches the model inside a fenced block, as data, never as instructions (D45).</li>
+      </ul>
+      <h3>Summaries</h3>
+      <p>Like Claude Code's compaction, older turns are condensed and recent ones stay word for word. Every 6 turns the chat's summary is rewritten from the previous summary plus the new turns, using a fixed template, so leaving a chat at any moment loses at most five unsummarised turns, and those stay in the chat itself.</p>
+      <h3>Recall</h3>
+      <p>Claude Code keeps a one-line index always loaded and opens a full memory only when a line looks relevant, so the model is the retriever. Simba does the same with an index of the last ~20 chat summaries, plus a <code>recall_memory(query)</code> tool for everything else: a small <strong>local embedding model</strong> (runs on your CPU, no API cost) finds things with similar meaning, SQLite full-text search finds exact words, and the two rankings are merged.</p>
+      <p><strong>Where you see it:</strong> a Memory tab in the sidebar lists facts by kind and chat summaries; you can add, edit, delete, or delete everything (D44). The trace shows how many facts were loaded, every save, and every recall.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Build step</th><th>What</th><th>Needs a real model?</th></tr></thead>
+        <tbody>
+          <tr><td>M1 #80</td><td class="wrap">Fact store, Memory tab, core profile in the prompt</td><td class="wrap">No</td></tr>
+          <tr><td>M2 #81</td><td class="wrap"><code>remember</code> tool with the code limits, Undo</td><td class="wrap">No (fake model in tests)</td></tr>
+          <tr><td>M3 #82</td><td class="wrap">Rolling summaries every 6 turns, index in the prompt</td><td class="wrap">No for tests; about one Haiku call per 6 turns in use</td></tr>
+          <tr><td>M4 #83</td><td class="wrap"><code>recall_memory</code>: local embeddings + keyword search</td><td class="wrap">No</td></tr>
         </tbody>
       </table></div>
     </section>
@@ -658,7 +682,7 @@ Safety
           <tr><td>0.4 · Phase 3</td><td class="wrap">Skills: Simba loads markdown skills; you add them by hand at first</td><td><span class="chip later">later</span></td></tr>
           <tr><td>0.4 · Phase 4</td><td class="wrap">Proposals: Simba writes one in chat, an approval card appears in the UI (#30)</td><td><span class="chip later">later</span></td></tr>
           <tr><td>0.4 · Phase 5</td><td class="wrap">Developer agent turns an approved proposal into a PR (#30)</td><td><span class="chip later">later</span></td></tr>
-          <tr><td>0.4 · Phase 6</td><td class="wrap">Memory across chats (#13, #14)</td><td><span class="chip later">later</span></td></tr>
+          <tr><td>Memory</td><td class="wrap">Facts and profile (#80), <code>remember</code> (#81), rolling summaries (#82), hybrid recall (#83); moved ahead of phases 2–5</td><td><span class="chip next">next</span></td></tr>
         </tbody>
       </table></div>
     </section>
@@ -707,6 +731,12 @@ Safety
           <tr><td>D37</td><td class="wrap">Skills first, then Python tools; MCP last and switched off by default</td><td class="wrap">Sol, 29 Sep, 0.4 Q2</td></tr>
           <tr><td>D38</td><td class="wrap">Two approvals: the UI card approves the idea, merging the PR approves the code</td><td class="wrap">Sol, 29 Sep, 0.4 Q3</td></tr>
           <tr><td>D39</td><td class="wrap">Refusal text: "Sorry, I can't help with that one. I'm happy to help with something else, though!" (warm, fixed, no joke)</td><td class="wrap">Sol, 29 Sep, #64</td></tr>
+          <tr><td>D40</td><td class="wrap">Facts are saved automatically by a <code>remember(kind, fact, why)</code> tool in the agent's call, using four kinds (user, feedback, project, reference); limits live in code: only this turn's user words, never after reading web content, size cap, dedupe, trace + Undo (replaces the approve-each idea in #14)</td><td class="wrap">Sol, 30 Sep, #79 Q1</td></tr>
+          <tr><td>D41</td><td class="wrap">Each chat keeps a rolling summary, updated every 6 turns by one model call from a fixed template</td><td class="wrap">Sol, 30 Sep, #79 Q2</td></tr>
+          <tr><td>D42</td><td class="wrap">Recall is hybrid: an index of recent chat summaries in the prompt, plus a <code>recall_memory</code> tool that searches with local embeddings and keywords (no API cost)</td><td class="wrap">Sol, 30 Sep, #79 Q3</td></tr>
+          <tr><td>D43</td><td class="wrap">A core profile of up to 15 <code>user</code> facts is always in the prompt; everything else is recalled on demand</td><td class="wrap">Sol, 30 Sep, #79 Q4</td></tr>
+          <tr><td>D44</td><td class="wrap">Memory is managed in a Memory tab in the sidebar: view, add, edit, delete, delete all</td><td class="wrap">Sol, 30 Sep, #79 Q5</td></tr>
+          <tr><td>D45</td><td class="wrap">Memory text (facts, summaries, recall results) is data inside a fenced block, never instructions</td><td class="wrap">Sol, 30 Sep, #79</td></tr>
         </tbody>
       </table></div>
     </section>
