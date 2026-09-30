@@ -61,6 +61,24 @@ Web search is optional. Add `TAVILY_API_KEY` to `backend/.env` to enable it; whe
 empty or missing, Simba starts normally without binding the search tool. Tests use a fake Tavily
 client and never make an external search request. Each user turn is limited to three search calls.
 
+## Evals (hand-run, costs money)
+
+`evals/search_cases.yaml` holds 30 questions that check how Simba uses web search (#54): does it search
+only when needed, with news filters for "today", do the results come back fresh, are its links real,
+and does the answer pass the case's rubric (graded by a judge model, Opus 5.5). Four checks are plain
+code; only the rubric costs a model call. Not run in CI.
+
+```bash
+cd backend
+uv run --group eval python -m evals.run_search_eval --fake                    # free dry run
+uv run --group eval python -m evals.run_search_eval --cases t01,n04           # a few real cases
+uv run --group eval python -m evals.run_search_eval --variant v1 --search replay   # compare a change
+```
+
+`--search record` (the default) saves Tavily's answers; `--search replay` reuses them, so two variants
+are compared on the same search results. Output goes to `.claude/hillclimb/search/<variant>/`
+(git-ignored): `summary.md`, `results.jsonl`, one trace per case.
+
 ## Repo layout
 
 ```

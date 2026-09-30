@@ -11,3 +11,4 @@ dist/
 .claude/ref/
 .claude/settings.local.json
 CLAUDE.local.md
+.claude/hillclimb/

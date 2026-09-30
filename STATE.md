@@ -17,6 +17,7 @@ None open — next items need the owner's input before they can be planned (see 
 - #39 subagents (needs owner answers) · #13 / #14 memory designs
 
 ## Recently done
+#54 web-search eval: 30 rubric cases, code graders + Opus judge, record/replay search ·
 #52 fresher search: today's date in the prompt, `topic`/`time_range` per search, query + filters in the trace ·
 #50 fix: trace panel's sr-only labels no longer stretch the page (empty scroll) ·
 #48 fix: a call to a tool that isn't configured becomes a text answer (was KeyError 'before_tool') ·
@@ -42,6 +43,7 @@ redesign) · #9 real Claude + token counts in trace · #15 output guard
 | HTTP API / SSE | `api.py`, `chats_api.py`, `specs/api-spec.json` (checked by `tests/test_api_spec.py`) |
 | Chat storage | `chats.py` (SQLite in `data/`) |
 | Frontend | `App.tsx` (state), `api.ts` (SSE parser), `components/TracePanel.tsx`, `ChatView.tsx`; style in `docs/visual-style.md` |
+| Web-search eval | `evals/search_cases.yaml` (cases + rubrics), `backend/evals/` (runner, graders); README → Evals |
 | Tests | `backend/tests/test_<module>.py`; `node_harness.py` runs one node in isolation |
 
 ## Blockers / notes
