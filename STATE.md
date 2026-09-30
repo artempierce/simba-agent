@@ -17,6 +17,7 @@ normalisation, #64 safety-eval follow-ups. Phase 2: #65 tool manifests, #66 appr
 - #39 subagents (needs owner answers) · #13 / #14 memory designs
 
 ## Recently done
+#64 warm fixed refusal (D39); safety eval grades the fixed refusal in code ·
 #67 design book 0.4: permissions, approvals, skills, developer agent; D30–D38 ·
 #58 safety eval: 30 OWASP-based cases (injection, leaks, harm, secrets, over-refusal) ·
 #10 personality: warm, upbeat, light humour (`system.md`; history in `docs/prompt-log.md`) ·

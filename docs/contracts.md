@@ -163,7 +163,7 @@ route; it only informs the agent node (§ 7.4), which makes the final call.
 
 ### § 7.3 `simba/nodes/refuse.py`
 
-`REFUSAL_TEXT = "I can't help with that request. Please ask about something else."` (D8).
+`REFUSAL_TEXT = "Sorry, I can't help with that one. I'm happy to help with something else, though!"` (D39, was D8).
 `async def refuse(state) -> dict` → `{"messages": [AIMessage(REFUSAL_TEXT)]}`. Trace `refuse`, `ok`,
 detail `fixed reply · {verdict.rule}`. No model. Never echoes the user's message.
 

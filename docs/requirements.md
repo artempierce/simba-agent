@@ -45,7 +45,7 @@ Each line should map to at least one test.
 - **Given** the local classifier scores a message as injection, **when** it's sent, **then** the message
   is only flagged (never blocked by the classifier) and the flag reaches the model as a note.
 - **Given** a request for harm, **when** the model judges it unsafe, **then** the reply is the fixed
-  refusal: "I can't help with that request. Please ask about something else."
+  refusal: "Sorry, I can't help with that one. I'm happy to help with something else, though!"
 - **Given** a streamed reply that contains a secret, an internal tag or a prompt leak, **when** it
   finishes, **then** it's retracted: the saved reply is replaced and the page swaps the bubble.
 - **Given** any turn, **then** the trace panel shows one line per step with status, detail, time, and a

@@ -15,9 +15,10 @@ from langchain_core.messages import AIMessage
 from simba.common import emit_trace
 from simba.state import ChatState
 
-# The fixed reply for every blocked message (design decision D8): plain, short, and never built from
-# the user's text, so nothing from a blocked message can reach the reply.
-REFUSAL_TEXT = "I can't help with that request. Please ask about something else."
+# The fixed reply for every blocked message (D39, replaced D8's colder wording in #64): warm, short,
+# and never built from the user's text, so nothing from a blocked message can reach the reply. No
+# joke on purpose: a refusal can follow something serious, and humour there would land badly.
+REFUSAL_TEXT = "Sorry, I can't help with that one. I'm happy to help with something else, though!"
 
 
 async def refuse(state: ChatState) -> dict:
