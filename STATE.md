@@ -9,13 +9,15 @@ Harness redesign done (design book 0.3): hooks listed in `harness/settings.py` r
 (#32); one `agent` node replaces intent/reason/generate (#33).
 
 ## Current focus
-None open — next items need the owner's input before they can be planned (see Next up).
+Design book 0.4 (safe growth, #67). Phase 1: #55 search prompt, #62 Sonnet by evals, #63 input
+normalisation, #64 safety-eval follow-ups. Phase 2: #65 tool manifests, #66 approval pause.
 
 ## Next up (post-MVP)
 - #30 Self-improvement (propose → approve → install), after the tool and approval design is ready
 - #39 subagents (needs owner answers) · #13 / #14 memory designs
 
 ## Recently done
+#67 design book 0.4: permissions, approvals, skills, developer agent; D30–D38 ·
 #58 safety eval: 30 OWASP-based cases (injection, leaks, harm, secrets, over-refusal) ·
 #10 personality: warm, upbeat, light humour (`system.md`; history in `docs/prompt-log.md`) ·
 #57 header pill: model + web search on/off from `GET /api/info` ·
