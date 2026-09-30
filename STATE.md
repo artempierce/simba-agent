@@ -12,11 +12,11 @@ Harness redesign done (design book 0.3): hooks listed in `harness/settings.py` r
 None open — next items need the owner's input before they can be planned (see Next up).
 
 ## Next up (post-MVP)
-- #10 Personality prompts (needs owner, one `system.md` to tune)
 - #30 Self-improvement (propose → approve → install), after the tool and approval design is ready
 - #39 subagents (needs owner answers) · #13 / #14 memory designs
 
 ## Recently done
+#10 personality: warm, upbeat, light humour (`system.md`; history in `docs/prompt-log.md`) ·
 #57 header pill: model + web search on/off from `GET /api/info` ·
 #54 web-search eval: 30 rubric cases, code graders + Opus judge, record/replay search ·
 #52 fresher search: today's date in the prompt, `topic`/`time_range` per search, query + filters in the trace ·
