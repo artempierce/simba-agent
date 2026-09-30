@@ -122,12 +122,12 @@ def make_node(
         memory_note = f" · memory {len(facts)}" if facts else ""
         prompt = [SystemMessage(system_text), *recent(state["messages"], HISTORY_LIMIT)]
 
-        # 2. Bind the unsafe-report control and only the configured read-only tools. Binding is
-        #    optional: ordinary messages can still receive normal text replies. Once this turn's
-        #    search budget is spent, the tools are no longer offered, so the model has to answer
-        #    with what it found (graph.py's after_before_tool ends the turn if it asks anyway).
+        # 2. Bind the unsafe-report control and the configured tools. Binding is optional: ordinary
+        #    messages can still receive normal text replies. Once this turn's search budget is spent,
+        #    web_search is no longer offered, so the model has to answer with what it found
+        #    (graph.py's after_before_tool ends the turn if it asks anyway); `remember` (#81) stays.
         budget_left = state["web_search_calls"] < MAX_WEB_SEARCH_CALLS_PER_TURN
-        offered = [ReportUnsafe, *tools] if budget_left else [ReportUnsafe]
+        offered = [ReportUnsafe, *(t for t in tools if budget_left or t.name != "web_search")]
         reply = await model.bind_tools(offered).ainvoke(prompt)
         tokens = tokens_used(reply)
 

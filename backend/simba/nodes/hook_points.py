@@ -22,6 +22,7 @@ from simba.harness.classifier import InjectionClassifier
 from simba.harness.hooks import run_hooks
 from simba.harness.output_guard import RETRACT_TEXT
 from simba.harness.settings import AFTER_MODEL, BEFORE_TOOL, before_model_hooks
+from simba.harness.tool_hooks import USER_TEXT_MESSAGES
 from simba.state import ChatState
 
 
@@ -100,12 +101,24 @@ async def before_tool(state: ChatState) -> dict:
 
     An invalid or unknown call gets a ToolMessage explaining the denial and a state flag that routes
     straight back to the agent, never through ToolNode. Valid calls are left untouched for dispatch.
+
+    Each call's hook payload also carries (#81):
+      calls_used           searches made so far this turn — only web_search calls count
+      turn_read_untrusted  whether this turn already got web results (no memory saves after that)
+      user_text            the owner's last USER_TEXT_MESSAGES messages (remember's own-words check)
     """
     assistant_message = state["messages"][-1]
     calls_used = state["web_search_calls"]
+    turn_read_untrusted, user_text = _turn_context(state["messages"])
     rejected: dict[str, str] = {}
-    for index, call in enumerate(assistant_message.tool_calls):
-        payload = json.dumps({"name": call["name"], "args": call["args"], "calls_used": calls_used + index})
+    searches = 0
+    for call in assistant_message.tool_calls:
+        payload = json.dumps({
+            "name": call["name"], "args": call["args"], "calls_used": calls_used + searches,
+            "turn_read_untrusted": turn_read_untrusted, "user_text": user_text,
+        })
+        if call["name"] == "web_search":
+            searches += 1
         hook_results = await run_hooks("before_tool", BEFORE_TOOL, payload)
         blocked = next((result for result in hook_results if result.action == "block"), None)
         if blocked is not None:
@@ -128,10 +141,22 @@ async def before_tool(state: ChatState) -> dict:
         ]
         return {
             "tool_call_blocked": True,
-            "web_search_calls": calls_used + len(assistant_message.tool_calls),
+            "web_search_calls": calls_used + searches,
             "messages": tool_messages,
         }
     return {
         "tool_call_blocked": False,
-        "web_search_calls": calls_used + len(assistant_message.tool_calls),
+        "web_search_calls": calls_used + searches,
     }
+
+
+def _turn_context(messages: list) -> tuple[bool, str]:
+    """(did this turn read web results?, the owner's recent words) for before_tool's hooks (#81).
+
+    "This turn" is everything after the newest human message; a web_search ToolMessage there means
+    untrusted text is already in play. The owner's words are their last USER_TEXT_MESSAGES messages.
+    """
+    last_human = max((i for i, m in enumerate(messages) if m.type == "human"), default=-1)
+    read_untrusted = any(m.type == "tool" and m.name == "web_search" for m in messages[last_human + 1:])
+    human_texts = [text_of(m) for m in messages if m.type == "human"][-USER_TEXT_MESSAGES:]
+    return read_untrusted, " ".join(human_texts)

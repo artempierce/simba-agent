@@ -90,7 +90,7 @@ Every node calls `emit_trace(stage, status, detail, start, tokens)` **exactly on
  "ms": 640, "input_tokens": 212, "output_tokens": 31, "cost_usd": 0.000367}
 ```
 
-`stage` ∈ `before_model | agent | before_tool | web_search | after_tool | after_model | refuse | budget` (`budget` is sent by api.py, not a node — § 9; `intent`/`reason`/`generate` on chats saved
+`stage` ∈ `before_model | agent | before_tool | web_search | after_tool | remember | after_model | refuse | budget` (`budget` is sent by api.py, not a node — § 9; `intent`/`reason`/`generate` on chats saved
 before #33; `guard`/`output_guard` on chats saved before #32; `echo` existed in steps 1–4 only).
 `status` ∈ `ok | blocked | error | flagged` (`flagged` = passed, but a hook raised a flag — shown as ⚑
 in the trace panel, in the guard colour, not the error colour). Detail formats are given per node in
@@ -283,6 +283,7 @@ classifier as above, and stores `app.state.graph`, `app.state.checkpointer` (and
 | `trace` | § 6 event | each node |
 | `token` | `{"text": str}` | answer chunks, sent only after the full reply passes `after_model` |
 | `error` | `{"message": str}` | an exception; then the stream ends |
+| `memory` | `{"action": "added"\|"updated", "fact_id", "kind", "text", "previous_text"}` | #81: the `remember` tool saved a fact; sent when it happens (not a trace line). Undo = DELETE an added fact, PATCH back `previous_text` for an updated one |
 | `replace` | `{"text": str}` | #15: `after_model` retracted the buffered answer; no unsafe answer chunks were sent. The page swaps the empty reply bubble for `text` just before `done` |
 | `done` | `{"input_tokens", "output_tokens", "cost_usd", "ms"}` | last; totals summed from trace events |
 
@@ -365,6 +366,19 @@ TEXT, created_at TEXT, updated_at TEXT)`. `KINDS = ("user", "feedback", "project
 | DELETE | `/api/memory` | – | `{"deleted": n}` |
 
 Guards: `<memory>` is an internal tag — `fake-tags` blocks it in input, `no_internal_tags` in output.
+
+**`remember` tool (#81, `simba/tools/remember.py`)** — `make_remember_tool(store)`; args `kind`, `fact`,
+`why?` (+ injected run config: `thread_id` becomes `source_chat_id`). Calls `MemoryStore.remember(kind,
+text, why, source_chat_id) -> (fact, "added" | "updated", previous_text)`: a same-kind fact whose
+`key_words` overlap ≥ `DUPLICATE_OVERLAP` (0.6) is updated instead of adding a copy. Emits trace
+`remember`, `ok`, `'{action} · {kind} · "{text}"'` (or `error`, `not saved · …`) and a custom chunk
+`{"memory_event": {...}}` that api.py sends as the SSE `memory` event. Returns `"Saved ({action}): {text}"`.
+`build_graph(..., remember_tool=...)` adds it to the tool loop; the agent offers it even after the
+search budget is spent. `before_tool` payload adds `turn_read_untrusted` (a web_search result after the
+newest human message) and `user_text` (the last `USER_TEXT_MESSAGES` = 6 human messages); only
+web_search calls count toward `web_search_calls`. Hook `memory_from_owner` blocks: after untrusted
+content (`memory-after-untrusted`), key-word overlap with `user_text` < `OWN_WORDS_OVERLAP` 0.5
+(`memory-not-own-words`), key-shaped text (`memory-secret`). `ALLOWED_TOOLS = ("web_search", "remember")`.
 
 ## § 11 Frontend
 

@@ -11,7 +11,7 @@ import Markdown from 'react-markdown'
 import { Fish, Paw, Whiskers, Yarn, DoodleBand } from './Doodles'
 import { SimbaAvatar } from './SimbaAvatar'
 import { moodFor, type Mood } from '../mood'
-import type { Message, Run } from '../types'
+import type { MemoryEvent, Message, RememberedFact, Run } from '../types'
 import type { ComponentType } from 'react'
 
 type Props = {
@@ -20,6 +20,7 @@ type Props = {
   busy: boolean // an answer is streaming; sending is disabled
   mood: Mood // Simba's current mood, for the empty state's avatar
   onSend: (text: string) => void // called with the trimmed message to send
+  onUndoMemory: (event: MemoryEvent) => void // #81: Undo was clicked under a "Remembered" note
 }
 
 /**
@@ -31,7 +32,7 @@ type Props = {
  *    newest text (including tokens streaming in) is always visible.
  * 3. The composer: Enter sends, Shift+Enter inserts a newline, read-only while an answer is streaming.
  */
-export function ChatView({ messages, runs, busy, mood, onSend }: Props) {
+export function ChatView({ messages, runs, busy, mood, onSend, onUndoMemory }: Props) {
   const [draft, setDraft] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
   const runOf = runForEachMessage(messages, runs) // runOf[i] = the run of message i's turn (replies only)
@@ -63,7 +64,7 @@ export function ChatView({ messages, runs, busy, mood, onSend }: Props) {
               const isLast = i === messages.length - 1
               const waiting = busy && isLast
               const avatarMood = moodFor(runOf[i], waiting, waiting && !!m.content)
-              return <Bubble key={i} message={m} waiting={waiting} avatarMood={avatarMood} />
+              return <Bubble key={i} message={m} waiting={waiting} avatarMood={avatarMood} onUndoMemory={onUndoMemory} />
             })
           )}
           <div ref={endRef} />
@@ -163,7 +164,17 @@ function runForEachMessage(messages: Message[], runs: Run[]): (Run | undefined)[
  * being computed here — a past, finished reply should always look grumpy/suspicious/dizzy/happy
  * exactly as its own run went, never flip moods just because a *later* message is now streaming.
  */
-function Bubble({ message, waiting, avatarMood }: { message: Message; waiting: boolean; avatarMood: Mood }) {
+function Bubble({
+  message,
+  waiting,
+  avatarMood,
+  onUndoMemory,
+}: {
+  message: Message
+  waiting: boolean
+  avatarMood: Mood
+  onUndoMemory: (event: MemoryEvent) => void
+}) {
   if (message.role === 'user') {
     return (
       <div className="ml-auto max-w-[85%] rounded-2xl rounded-br-md bg-sky px-4 py-2.5 whitespace-pre-wrap text-ink">
@@ -197,8 +208,39 @@ function Bubble({ message, waiting, avatarMood }: { message: Message; waiting: b
             Couldn't get a reply: {message.error}
           </p>
         )}
+        {/* #81: what this reply remembered, each with an Undo (see MemoryNote). */}
+        {message.memories?.map((fact) => (
+          <MemoryNote key={fact.fact_id} fact={fact} onUndo={() => onUndoMemory(fact)} />
+        ))}
       </div>
     </div>
+  )
+}
+
+/**
+ * One saved-fact note under a reply (#81): "Remembered: <fact> · Undo" for a new fact, "Updated
+ * memory: <fact> · Undo" for a reworded one. After Undo it just says what happened, so the note never
+ * offers an action that no longer applies.
+ */
+function MemoryNote({ fact, onUndo }: { fact: RememberedFact; onUndo: () => void }) {
+  const label = fact.action === 'added' ? 'Remembered' : 'Updated memory'
+  return (
+    <p className="mt-1 flex flex-wrap items-baseline gap-x-1.5 text-xs text-muted">
+      <span aria-hidden="true">✦</span>
+      {fact.undone ? (
+        <span>{fact.action === 'added' ? 'Forgotten' : 'Put back the old wording'}: “{fact.text}”</span>
+      ) : (
+        <>
+          <span>
+            {label}: “{fact.text}”
+          </span>
+          <span aria-hidden="true">·</span>
+          <button type="button" onClick={onUndo} className="underline decoration-dotted hover:text-ink">
+            Undo
+          </button>
+        </>
+      )}
+    </p>
   )
 }
 

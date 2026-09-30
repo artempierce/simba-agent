@@ -93,7 +93,7 @@ async def run_hooks(point: str, hooks: list[Hook], text: str) -> list[HookResult
         status, detail = "blocked", f"blocked · {blocked.rule}"
     else:
         status = "flagged" if any(r.action == "flag" for r in results) else "ok"
-        detail = ("pass · " + " · ".join(r.reason for r in results))[:80]
+        detail = ("pass · " + " · ".join(r.reason for r in results if r.reason))[:80]  # a hook that doesn't apply says ""
 
     emit_trace(point, status, detail, start)
     return results

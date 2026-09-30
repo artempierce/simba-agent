@@ -34,7 +34,7 @@ import { SimbaAvatar } from './components/SimbaAvatar'
 import { TracePanel } from './components/TracePanel'
 import { addFact, deleteAllFacts, deleteFact, listFacts, updateFact } from './memoryApi'
 import { moodFor } from './mood'
-import type { Chat, Fact, FactKind, Message, Run, ServerInfo } from './types'
+import type { Chat, Fact, FactKind, MemoryEvent, Message, Run, ServerInfo } from './types'
 
 export default function App() {
   const [chatId, setChatId] = useState<string | null>(null) // null = a new, unsaved chat
@@ -114,6 +114,25 @@ export default function App() {
     await refreshFacts()
   }
 
+  /**
+   * Undo a fact a reply saved (#81): delete a new fact, or put back the old wording of an updated one,
+   * then mark it undone in every reply that shows it, and refresh the Memory tab's list.
+   */
+  async function undoMemory(event: MemoryEvent) {
+    await changeMemory(() =>
+      event.action === 'added' || event.previous_text === null
+        ? deleteFact(event.fact_id)
+        : updateFact(event.fact_id, event.previous_text),
+    )
+    setMessages((ms) =>
+      ms.map((m) =>
+        m.memories?.some((f) => f.fact_id === event.fact_id)
+          ? { ...m, memories: m.memories.map((f) => (f.fact_id === event.fact_id ? { ...f, undone: true } : f)) }
+          : m,
+      ),
+    )
+  }
+
   /** Switch the left-pane tab; opening Memory loads the latest facts. */
   function openTab(tab: LeftTab) {
     setLeftTab(tab)
@@ -174,6 +193,8 @@ export default function App() {
       onToken: (t) => updateReply((m) => ({ ...m, content: m.content + t })),
       // Retracted by the output guard (#15): replace, don't append — the streamed text must go.
       onReplace: (t) => updateReply((m) => ({ ...m, content: t })),
+      // #81: a fact this reply saved; ChatView shows it under the reply with an Undo.
+      onMemory: (event) => updateReply((m) => ({ ...m, memories: [...(m.memories ?? []), event] })),
       onError: (message) => {
         // The trace panel is hidden below 1024px (lg), so an error must also reach the reply
         // bubble itself, or it would be invisible on narrow screens.
@@ -332,7 +353,7 @@ export default function App() {
             </div>
           )}
           <div className="min-h-0 flex-1">
-            <ChatView messages={messages} runs={runs} busy={busy} mood={mood} onSend={send} />
+            <ChatView messages={messages} runs={runs} busy={busy} mood={mood} onSend={send} onUndoMemory={undoMemory} />
           </div>
         </div>
         <TracePanel runs={runs} busy={busy} />

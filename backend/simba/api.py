@@ -28,7 +28,8 @@ blocks, each shaped like
 The browser reads them one at a time (frontend's streamChat, contracts.md § 11). Five event types
 exist, always in this order for one turn: `start` (once, first) -> any number of `trace` -> any
 number of `token` -> `done` (once, last) — or `error` instead of `done` if the graph raised. A sixth,
-`replace`, comes just before `done` when the output guard retracts an answer (#15). Agent text is
+`replace`, comes just before `done` when the output guard retracts an answer (#15). A seventh,
+`memory`, reports each fact the `remember` tool saved (#81), so the page can offer Undo. Agent text is
 held until the output guard passes, so unsafe answer text is never sent to the browser.
 """
 
@@ -57,6 +58,7 @@ from simba.harness.classifier import InjectionClassifier, load_classifier
 from simba.harness.output_guard import RETRACT_TEXT
 from simba.harness.settings import CHAT_BUDGET_USD
 from simba.model import cost_usd, make_model, model_name
+from simba.tools.remember import make_remember_tool
 from simba.tools.web_search import make_web_search_tool
 
 # backend/.env holds SIMBA_FAKE_LLM / ANTHROPIC_API_KEY (git-ignored: the repo is public).
@@ -145,7 +147,8 @@ def create_app(
                 app.state.memory = memory
                 graph_options = {"web_search_tool": resolved_web_search_tool} if resolved_web_search_tool else {}
                 app.state.graph = build_graph(chat_model, checkpointer, resolved_classifier,
-                                              load_profile=memory.core_profile, **graph_options)
+                                              load_profile=memory.core_profile,
+                                              remember_tool=make_remember_tool(memory), **graph_options)
                 yield
             finally:
                 await chats.close()
@@ -296,7 +299,10 @@ def create_app(
                 # 3. Run the graph. Trace lines stream immediately; answer chunks wait for the
                 #    completed reply's after_model check before they can reach the browser.
                 async for mode, chunk in graph.astream(turn_input, config, stream_mode=["messages", "custom"]):
-                    if mode == "custom":
+                    if mode == "custom" and "memory_event" in chunk:
+                        # #81: the remember tool saved a fact; the page shows "Remembered: … · Undo".
+                        yield sse("memory", chunk["memory_event"])
+                    elif mode == "custom":
                         tokens_in += chunk.get("input_tokens", 0)
                         tokens_out += chunk.get("output_tokens", 0)
                         lines.append(chunk)

@@ -93,7 +93,7 @@
         "responses": {
           "200": {
             "description": "The turn as a stream of SSE blocks. Order: `start` (once, first) → `trace` (one per hook point/node) and `token` (answer chunks sent only after after_model approves the complete reply) → `replace` (only if after_model retracted the buffered answer) → `done` (once, last). On an exception after `start`, `error` replaces `done` and ends the stream.",
-            "x-sse-events": ["start", "trace", "token", "replace", "error", "done"],
+            "x-sse-events": ["start", "trace", "token", "replace", "memory", "error", "done"],
             "content": {
               "text/event-stream": {
                 "schema": { "$ref": "#/components/schemas/SseEvent" },
@@ -350,6 +350,7 @@
           { "$ref": "#/components/schemas/TraceEvent" },
           { "$ref": "#/components/schemas/TokenEvent" },
           { "$ref": "#/components/schemas/ReplaceEvent" },
+          { "$ref": "#/components/schemas/MemoryEvent" },
           { "$ref": "#/components/schemas/ErrorEvent" },
           { "$ref": "#/components/schemas/DoneEvent" }
         ],
@@ -381,6 +382,25 @@
         "properties": {
           "event": { "const": "token" },
           "data": { "type": "object", "required": ["text"], "properties": { "text": { "type": "string" } } }
+        }
+      },
+      "MemoryEvent": {
+        "type": "object",
+        "description": "#81: the remember tool saved a fact (added, or a near-duplicate updated). The page shows 'Remembered: … · Undo' under the reply; Undo deletes an added fact or restores previous_text.",
+        "required": ["event", "data"],
+        "properties": {
+          "event": { "const": "memory" },
+          "data": {
+            "type": "object",
+            "required": ["action", "fact_id", "kind", "text", "previous_text"],
+            "properties": {
+              "action": { "type": "string", "enum": ["added", "updated"] },
+              "fact_id": { "type": "integer" },
+              "kind": { "$ref": "#/components/schemas/FactKind" },
+              "text": { "type": "string", "examples": ["Mostly works in Python"] },
+              "previous_text": { "type": ["string", "null"] }
+            }
+          }
         }
       },
       "ReplaceEvent": {
