@@ -17,6 +17,7 @@ normalisation, #64 safety-eval follow-ups. Phase 2: #65 tool manifests, #66 appr
 - #39 subagents (needs owner answers) · #13 / #14 memory designs
 
 ## Recently done
+#72 #73 DeepEval benchmark (30 cases, targets) + DeepTeam red teaming, built not run (`evals/deepeval/`) ·
 #63 guard folds spelling tricks (look-alike letters, accents, spaced letters, leetspeak, line breaks) ·
 #64 warm fixed refusal (D39); safety eval grades the fixed refusal in code ·
 #67 design book 0.4: permissions, approvals, skills, developer agent; D30–D38 ·
@@ -49,6 +50,7 @@ redesign) · #9 real Claude + token counts in trace · #15 output guard
 | HTTP API / SSE | `api.py`, `chats_api.py`, `specs/api-spec.json` (checked by `tests/test_api_spec.py`) |
 | Chat storage | `chats.py` (SQLite in `data/`) |
 | Frontend | `App.tsx` (state), `api.ts` (SSE parser), `components/TracePanel.tsx`, `ChatView.tsx`; style in `docs/visual-style.md` |
+| Benchmark + red team | `evals/deepeval/` (separate uv project, HTTP black-box), `evals/benchmark_cases.yaml`, `targets.yaml` |
 | Evals (search, safety) | `evals/*_cases.yaml` (cases + rubrics), `backend/evals/` (runners, graders); results in the main checkout's `.claude/hillclimb/`; README → Evals |
 | Tests | `backend/tests/test_<module>.py`; `node_harness.py` runs one node in isolation |
 
