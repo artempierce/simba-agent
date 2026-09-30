@@ -3,6 +3,14 @@
 Why `backend/simba/prompts/system.md` changed, newest first. One entry per change: what, why, and how
 it was checked. (#10 asked for this before/after log.)
 
+## 2026-09-30 — memory by talking (#87)
+
+- **Changed:** the Memory section now covers the "how the user wants you to work" notes (follow them),
+  and managing memory by talking: list_memory for "what do you remember", update_memory for
+  corrections, forget_memory only after asking "Forget …? (yes/no)" and getting a yes.
+- **Why:** owner decision D46–D48: memory is managed only through conversation, like Claude Code's own.
+- **Checked:** backend tests with the fake model (incl. the forget flow); no paid runs.
+
 ## 2026-09-30 — memory: when to remember (#81)
 
 - **Added:** a Memory section: use the <memory> block when it helps without reciting it; save lasting facts

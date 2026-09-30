@@ -49,9 +49,9 @@ export type Fact = {
   updated_at: string
 }
 
-/** The SSE `memory` event (#81): the remember tool saved a fact while writing a reply. */
+/** The SSE `memory` event (#81, #87): a memory tool saved, updated or forgot a fact while writing a reply. */
 export type MemoryEvent = {
-  action: 'added' | 'updated' // a new fact, or a near-duplicate rewritten in the new words
+  action: 'added' | 'updated' | 'forgotten' // saved, rewritten (incl. near-duplicates), or deleted after your yes
   fact_id: number
   kind: FactKind
   text: string

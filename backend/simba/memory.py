@@ -7,15 +7,19 @@ core profile from it at the start of every turn (`core_profile`), so what you to
 is known in the next.
 
 Key ideas:
-- A fact has a kind, the same four Claude Code uses for its own memory (see KINDS). Only `user`
-  facts make up the core profile that goes into every prompt (D43); the other kinds wait for the
-  recall tool (#83).
+- A fact has a kind, the same four Claude Code uses for its own memory (see KINDS). `user` facts
+  (the profile, D43) and `feedback` facts (learned "how to work with me" rules — procedural memory,
+  D48) go into every prompt; `project` and `reference` facts are looked up when needed.
+- Memory changes only by talking to Simba (#87, D46): its tools call this store. Forgetting is
+  two-step (D47): a request is parked as "pending" for the chat, and only the owner's clear "yes" in
+  the very next message lets it through (`is_clear_yes`, the forget tool).
 - Everything is plain SQL on one table. Size limits are enforced here, in code, so no caller can
   store a fact longer than MAX_FACT_CHARS or more than MAX_FACTS facts (D40's code limits).
 """
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 
@@ -34,9 +38,19 @@ MAX_FACT_CHARS = 300
 # Most facts kept in total. Enough for a personal assistant; small enough that nothing grows forever.
 MAX_FACTS = 200
 
-# How many `user` facts go into every prompt (D43): the newest ones. ~15 short lines is a few hundred
-# tokens — cheap on every turn, and it's what almost every answer can use.
+# How many facts of each always-loaded kind go into every prompt (D43, D48): the newest 15 `user`
+# facts and the newest 15 `feedback` facts. ~30 short lines is a few hundred tokens — cheap on every
+# turn, and it's what almost every answer can use.
 CORE_PROFILE_LIMIT = 15
+
+# The kinds that are always in the prompt, in the order the prompt shows them.
+ALWAYS_LOADED = ("user", "feedback")
+
+# A reply counts as "yes" for a pending forget only if it starts with one of these, and contains
+# none of NEGATIONS. Deliberately strict: when in doubt, nothing is deleted and Simba asks again.
+YES_WORDS = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "confirm", "confirmed", "go ahead",
+             "do it", "please do", "delete it", "forget it", "да")
+NEGATIONS = ("no", "not", "don't", "dont", "wait", "cancel", "stop", "keep", "нет")
 
 _COLUMNS = ("id", "kind", "text", "why", "source_chat_id", "created_at", "updated_at")
 
@@ -103,6 +117,13 @@ class MemoryStore:
             """CREATE TABLE IF NOT EXISTS memory_facts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, text TEXT NOT NULL,
                 why TEXT, source_chat_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            )"""
+        )
+        # #87: at most one forget request waiting for a "yes", per chat. `target` is a JSON list of
+        # fact ids, or "all"; `human_turn` is how many owner messages the chat had when it was asked.
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS memory_pending (
+                chat_id TEXT PRIMARY KEY, target TEXT NOT NULL, human_turn INTEGER NOT NULL
             )"""
         )
         await db.commit()
@@ -192,17 +213,63 @@ class MemoryStore:
         await self._db.commit()
         return cursor.rowcount
 
-    async def core_profile(self) -> list[str]:
-        """The texts of the newest CORE_PROFILE_LIMIT `user` facts: what every prompt includes (D43)."""
-        cursor = await self._db.execute(
-            "SELECT text FROM memory_facts WHERE kind = 'user' ORDER BY updated_at DESC, id DESC LIMIT ?",
-            (CORE_PROFILE_LIMIT,),
+    async def core_profile(self) -> dict[str, list[str]]:
+        """What every prompt includes: the newest CORE_PROFILE_LIMIT facts of each ALWAYS_LOADED kind.
+
+        Example: {"user": ["Name: Sol"], "feedback": ["Prefers short answers"]}
+        """
+        profile: dict[str, list[str]] = {}
+        for kind in ALWAYS_LOADED:
+            cursor = await self._db.execute(
+                "SELECT text FROM memory_facts WHERE kind = ? ORDER BY updated_at DESC, id DESC LIMIT ?",
+                (kind, CORE_PROFILE_LIMIT),
+            )
+            profile[kind] = [text for (text,) in await cursor.fetchall()]
+        return profile
+
+    async def delete_facts(self, fact_ids: list[int]) -> list[dict]:
+        """Delete these facts; returns the ones that existed (so the caller can say what was forgotten)."""
+        gone = [fact for fact_id in fact_ids if (fact := await self.get_fact(fact_id)) is not None]
+        for fact in gone:
+            await self._db.execute("DELETE FROM memory_facts WHERE id = ?", (fact["id"],))
+        await self._db.commit()
+        return gone
+
+    async def set_pending(self, chat_id: str, target: list[int] | str, human_turn: int) -> None:
+        """Park a forget request for this chat until the owner answers (replaces any earlier one)."""
+        await self._db.execute(
+            "INSERT OR REPLACE INTO memory_pending (chat_id, target, human_turn) VALUES (?, ?, ?)",
+            (chat_id, json.dumps(target), human_turn),
         )
-        return [text for (text,) in await cursor.fetchall()]
+        await self._db.commit()
+
+    async def get_pending(self, chat_id: str) -> tuple[list[int] | str, int] | None:
+        """The parked forget request for this chat as (target, human_turn), or None."""
+        cursor = await self._db.execute("SELECT target, human_turn FROM memory_pending WHERE chat_id = ?", (chat_id,))
+        row = await cursor.fetchone()
+        return (json.loads(row[0]), row[1]) if row else None
+
+    async def clear_pending(self, chat_id: str) -> None:
+        """Drop this chat's parked forget request."""
+        await self._db.execute("DELETE FROM memory_pending WHERE chat_id = ?", (chat_id,))
+        await self._db.commit()
 
     async def close(self) -> None:
         """Close the database connection (api.py's lifespan calls this on shutdown)."""
         await self._db.close()
+
+
+def is_clear_yes(text: str) -> bool:
+    """Whether the owner's message is a plain yes (D47): it starts with a YES_WORDS entry and contains
+    no NEGATIONS word. Strict on purpose — a doubtful answer deletes nothing.
+
+    Examples: "Yes, forget it" -> True; "ok" -> True; "yes but not the Python one" -> False;
+    "no" -> False; "tell me more" -> False
+    """
+    words = re.findall(r"[\w']+", text.lower())
+    joined = " ".join(words)
+    starts_yes = any(joined == w or joined.startswith(w + " ") for w in YES_WORDS)
+    return starts_yes and not any(neg in words for neg in NEGATIONS)
 
 
 def _checked_text(text: str) -> str:

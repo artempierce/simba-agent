@@ -12,7 +12,7 @@
     { "name": "chat", "description": "Send a message and stream Simba's work and answer." },
     { "name": "chats", "description": "The sidebar's chat list: list, create, open, rename, delete." },
     { "name": "health", "description": "Liveness and what the server runs with." },
-    { "name": "memory", "description": "Saved facts about the owner (#80): the Memory tab." }
+    { "name": "memory", "description": "Saved facts about the owner (#80, #87): read by the Memory page; changed by talking to Simba." }
   ],
   "paths": {
     "/api/health": {
@@ -47,21 +47,12 @@
       "get": {
         "tags": ["memory"], "operationId": "listFacts", "summary": "Every saved fact, newest change first",
         "responses": { "200": { "description": "The facts.", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Fact" } } } } } }
-      },
-      "post": {
-        "tags": ["memory"], "operationId": "addFact", "summary": "Save a fact",
-        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/NewFact" } } } },
-        "responses": {
-          "201": { "description": "The saved fact.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Fact" } } } },
-          "409": { "description": "Memory is full (200 facts)." },
-          "422": { "description": "Bad kind, or text empty or over 300 characters." }
-        }
       }
     },
     "/api/memory/facts/{fact_id}": {
       "parameters": [ { "name": "fact_id", "in": "path", "required": true, "schema": { "type": "integer" } } ],
       "patch": {
-        "tags": ["memory"], "operationId": "updateFact", "summary": "Change a fact's kind, text or why",
+        "tags": ["memory"], "operationId": "updateFact", "summary": "Rewrite a fact (Undo of an update)",
         "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FactChange" } } } },
         "responses": {
           "200": { "description": "The changed fact.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Fact" } } } },
@@ -70,14 +61,8 @@
         }
       },
       "delete": {
-        "tags": ["memory"], "operationId": "deleteFact", "summary": "Forget one fact",
+        "tags": ["memory"], "operationId": "deleteFact", "summary": "Delete a fact (Undo of a save)",
         "responses": { "204": { "description": "Deleted." }, "404": { "description": "Unknown fact id." } }
-      }
-    },
-    "/api/memory": {
-      "delete": {
-        "tags": ["memory"], "operationId": "deleteAllMemory", "summary": "Forget every fact",
-        "responses": { "200": { "description": "How many facts were deleted.", "content": { "application/json": { "schema": { "type": "object", "required": ["deleted"], "properties": { "deleted": { "type": "integer" } } } } } } }
       }
     },
     "/api/chat": {
@@ -222,14 +207,6 @@
         }
       },
       "FactKind": { "type": "string", "enum": ["user", "feedback", "project", "reference"] },
-      "NewFact": {
-        "type": "object", "required": ["kind", "text"],
-        "properties": {
-          "kind": { "$ref": "#/components/schemas/FactKind" },
-          "text": { "type": "string", "minLength": 1, "maxLength": 300 },
-          "why": { "type": ["string", "null"], "maxLength": 300 }
-        }
-      },
       "FactChange": {
         "type": "object",
         "properties": {
@@ -386,7 +363,7 @@
       },
       "MemoryEvent": {
         "type": "object",
-        "description": "#81: the remember tool saved a fact (added, or a near-duplicate updated). The page shows 'Remembered: … · Undo' under the reply; Undo deletes an added fact or restores previous_text.",
+        "description": "#81, #87: a memory tool saved, updated or forgot a fact. The page shows it under the reply; saves and updates get Undo (delete an added fact / restore previous_text).",
         "required": ["event", "data"],
         "properties": {
           "event": { "const": "memory" },
@@ -394,7 +371,7 @@
             "type": "object",
             "required": ["action", "fact_id", "kind", "text", "previous_text"],
             "properties": {
-              "action": { "type": "string", "enum": ["added", "updated"] },
+              "action": { "type": "string", "enum": ["added", "updated", "forgotten"] },
               "fact_id": { "type": "integer" },
               "kind": { "$ref": "#/components/schemas/FactKind" },
               "text": { "type": "string", "examples": ["Mostly works in Python"] },

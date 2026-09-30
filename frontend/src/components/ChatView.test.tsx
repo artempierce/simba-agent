@@ -45,4 +45,11 @@ describe('ChatView memory notes', () => {
     expect(screen.getByText('Put back the old wording: “Has two cats”')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull()
   })
+
+  /** #87: a fact forgotten after the owner's yes shows as "Forgot", with nothing to undo. */
+  it('shows a forgotten fact without Undo', () => {
+    setup([{ action: 'forgotten', fact_id: 3, kind: 'user', text: 'Works at Acme', previous_text: null }])
+    expect(screen.getByText('Forgot: “Works at Acme”')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Undo' })).toBeNull()
+  })
 })

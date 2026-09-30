@@ -1,11 +1,12 @@
 /**
- * memoryApi.ts — fetch helpers for the Memory tab (#80): list, add, edit and delete saved facts, or
- * forget everything. Talks to `simba/memory_api.py` per docs/contracts.md § 10b.
+ * memoryApi.ts — fetch helpers for memory (#80, #87): read every saved fact (the Memory page), and the
+ * two calls Undo needs. Talks to `simba/memory_api.py` per docs/contracts.md § 10b. Adding and
+ * forgetting happen by talking to Simba, so there are no helpers for those.
  *
  * Same shape as chatsApi.ts: callers get typed data or a thrown `Error` with the server's own
  * message, never a raw `Response`.
  */
-import type { Fact, FactKind } from './types'
+import type { Fact } from './types'
 
 /** All memory routes share this prefix. */
 const BASE = '/api/memory'
@@ -36,14 +37,8 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 /** Every saved fact, newest change first (GET /api/memory/facts). */
 export const listFacts = () => send<Fact[]>('/facts', 'GET')
 
-/** Save a new fact (POST /api/memory/facts); the server trims it and enforces the size limits. */
-export const addFact = (kind: FactKind, text: string) => send<Fact>('/facts', 'POST', { kind, text })
-
-/** Change a fact's text (PATCH /api/memory/facts/{id}). */
+/** Put back a fact's text (PATCH /api/memory/facts/{id}) — Undo of an update. */
 export const updateFact = (id: number, text: string) => send<Fact>(`/facts/${id}`, 'PATCH', { text })
 
-/** Forget one fact (DELETE /api/memory/facts/{id}). */
+/** Delete one fact (DELETE /api/memory/facts/{id}) — Undo of a save. */
 export const deleteFact = (id: number) => send<void>(`/facts/${id}`, 'DELETE')
-
-/** Forget every fact (DELETE /api/memory); resolves to how many were deleted. */
-export const deleteAllFacts = () => send<{ deleted: number }>('', 'DELETE')

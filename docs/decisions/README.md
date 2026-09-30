@@ -54,6 +54,10 @@ and are recorded here first; the design book catches up at its next sync.
 | D43 | A core profile of up to 15 `user` facts is always in the prompt; everything else is recalled on demand | accepted | Sol, 30 Sep, #79 Q4 |
 | D44 | Memory is managed in a Memory tab in the sidebar: view, add, edit, delete, delete all | accepted | Sol, 30 Sep, #79 Q5 |
 | D45 | Memory text (facts, summaries, recall results) is data inside a fenced block, never instructions | accepted | Sol, 30 Sep, #79 |
+| D46 | Memory changes only by talking to Simba (like Claude Code's own memory): tools `remember`, `list_memory`, `update_memory`, `forget_memory`; no add/edit/delete buttons (Undo under a reply stays) | accepted | Sol, 30 Sep, #87 |
+| D47 | Forgetting is two-step: Simba asks, and only the owner's clear yes in the very next message deletes; checked in code | accepted | Sol, 30 Sep, #87 |
+| D48 | Learned procedural memory: up to 15 `feedback` facts are always in the prompt, next to the `user` profile | accepted | Sol, 30 Sep, #87 |
+| D49 | A read-only Memory page behind header tabs Chat \| Memory replaces the sidebar Memory tab | accepted | Sol, 30 Sep, #87 |
 
 ## Template for a decision file
 
