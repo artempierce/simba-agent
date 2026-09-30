@@ -11,7 +11,7 @@
   "tags": [
     { "name": "chat", "description": "Send a message and stream Simba's work and answer." },
     { "name": "chats", "description": "The sidebar's chat list: list, create, open, rename, delete." },
-    { "name": "health", "description": "Liveness." }
+    { "name": "health", "description": "Liveness and what the server runs with." }
   ],
   "paths": {
     "/api/health": {
@@ -24,6 +24,20 @@
           "200": {
             "description": "The server is up.",
             "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Health" } } }
+          }
+        }
+      }
+    },
+    "/api/info": {
+      "get": {
+        "tags": ["health"],
+        "operationId": "info",
+        "summary": "What the server runs with (#57)",
+        "description": "The model's name (\"fake\" for the free fake model), whether web search is on, and the per-chat budget. Read from what the app built at start-up, so it matches what a chat will really use.",
+        "responses": {
+          "200": {
+            "description": "The server's setup.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Info" } } }
           }
         }
       }
@@ -155,6 +169,15 @@
         "type": "object",
         "required": ["ok"],
         "properties": { "ok": { "type": "boolean", "const": true } }
+      },
+      "Info": {
+        "type": "object",
+        "required": ["model", "web_search", "chat_budget_usd"],
+        "properties": {
+          "model": { "type": "string", "examples": ["claude-haiku-4-5", "fake"] },
+          "web_search": { "type": "boolean", "description": "True when TAVILY_API_KEY was set at start-up." },
+          "chat_budget_usd": { "type": "number", "examples": [0.5] }
+        }
       },
       "ChatRequest": {
         "type": "object",

@@ -12,13 +12,14 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { streamChat } from './api'
-import { getChat, listChats } from './chatsApi'
+import { getChat, getInfo, listChats } from './chatsApi'
 import type { Chat, Message, Run } from './types'
 
 vi.mock('./api', () => ({ streamChat: vi.fn() }))
 vi.mock('./chatsApi', () => ({
   listChats: vi.fn(),
   getChat: vi.fn(),
+  getInfo: vi.fn(),
   renameChat: vi.fn(),
   deleteChat: vi.fn(),
 }))
@@ -58,6 +59,7 @@ beforeEach(() => {
   // jsdom has no layout, so it lacks scrollIntoView; ChatView and TracePanel call it to auto-scroll.
   Element.prototype.scrollIntoView = vi.fn()
   vi.mocked(listChats).mockResolvedValue([chat('a', 'Chat A'), chat('b', 'Chat B')])
+  vi.mocked(getInfo).mockResolvedValue({ model: 'fake', web_search: false, chat_budget_usd: 0.5 })
 })
 
 afterEach(() => {

@@ -9,6 +9,7 @@ and turning one graph run into server-sent events (SSE).
 Endpoints:
 
     GET  /api/health   liveness check for the frontend/dev loop: {"ok": true}
+    GET  /api/info     what this server runs with (model, web search on/off, chat budget) — #57
     POST /api/chat      send one message; the reply streams back as SSE
          /api/chats     the chat list: list, create, open, rename, delete (chats_api.py, § 10)
 
@@ -52,7 +53,7 @@ from simba.graph import build_graph
 from simba.harness.classifier import InjectionClassifier, load_classifier
 from simba.harness.output_guard import RETRACT_TEXT
 from simba.harness.settings import CHAT_BUDGET_USD
-from simba.model import cost_usd, make_model
+from simba.model import cost_usd, make_model, model_name
 from simba.tools.web_search import make_web_search_tool
 
 # backend/.env holds SIMBA_FAKE_LLM / ANTHROPIC_API_KEY (git-ignored: the repo is public).
@@ -150,6 +151,21 @@ def create_app(
     async def health():
         """Liveness check the frontend/dev loop polls for. No graph or storage touched."""
         return {"ok": True}
+
+    @app.get("/api/info")
+    async def info():
+        """What this server is running with, for the header pill (#57): the model's name ("fake" for
+        the free fake model), whether web search is on, and the per-chat budget.
+
+        Why read it from the objects create_app built, not from environment variables: the pill must
+        show what Simba will *really* use. A key typed into .env after the server started, for
+        example, isn't in use until a restart — and the pill should say so.
+        """
+        return {
+            "model": model_name(chat_model),
+            "web_search": resolved_web_search_tool is not None,
+            "chat_budget_usd": CHAT_BUDGET_USD,
+        }
 
     @app.post("/api/chat")
     async def chat(req: ChatRequest):

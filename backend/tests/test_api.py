@@ -464,3 +464,23 @@ async def test_chat_just_under_budget_still_answers(tmp_path):
 
         assert events[-1][0] == "done"
         assert "budget" not in [data.get("stage") for name, data in events if name == "trace"]
+
+
+async def test_info_reports_the_model_and_search_the_app_really_uses(tmp_path):
+    """#57: the header pill must show what a chat will actually use — here the fake model with no
+    search tool — so a missing TAVILY_API_KEY is visible at a glance instead of discovered by asking."""
+    async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (_app, client):
+        info = (await client.get("/api/info")).json()
+    assert info == {"model": "fake", "web_search": False, "chat_budget_usd": 0.5}
+
+
+async def test_info_says_search_is_on_when_a_search_tool_was_built(tmp_path):
+    """The flag follows the tool create_app built, not the environment."""
+    from simba.tools.web_search import make_web_search_tool
+
+    class NoSearch:
+        async def ainvoke(self, params):
+            return {"results": []}
+
+    async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db"), web_search_tool=make_web_search_tool(NoSearch())) as (_app, client):
+        assert (await client.get("/api/info")).json()["web_search"] is True
