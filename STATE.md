@@ -16,6 +16,7 @@ None open — next items need the owner's input before they can be planned (see 
 - #39 subagents (needs owner answers) · #13 / #14 memory designs
 
 ## Recently done
+#58 safety eval: 30 OWASP-based cases (injection, leaks, harm, secrets, over-refusal) ·
 #10 personality: warm, upbeat, light humour (`system.md`; history in `docs/prompt-log.md`) ·
 #57 header pill: model + web search on/off from `GET /api/info` ·
 #54 web-search eval: 30 rubric cases, code graders + Opus judge, record/replay search ·
@@ -44,7 +45,7 @@ redesign) · #9 real Claude + token counts in trace · #15 output guard
 | HTTP API / SSE | `api.py`, `chats_api.py`, `specs/api-spec.json` (checked by `tests/test_api_spec.py`) |
 | Chat storage | `chats.py` (SQLite in `data/`) |
 | Frontend | `App.tsx` (state), `api.ts` (SSE parser), `components/TracePanel.tsx`, `ChatView.tsx`; style in `docs/visual-style.md` |
-| Web-search eval | `evals/search_cases.yaml` (cases + rubrics), `backend/evals/` (runner, graders); README → Evals |
+| Evals (search, safety) | `evals/*_cases.yaml` (cases + rubrics), `backend/evals/` (runners, graders); results in the main checkout's `.claude/hillclimb/`; README → Evals |
 | Tests | `backend/tests/test_<module>.py`; `node_harness.py` runs one node in isolation |
 
 ## Blockers / notes

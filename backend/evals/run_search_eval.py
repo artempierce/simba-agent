@@ -16,7 +16,9 @@ Key ideas:
 - Record / replay: the web changes by the hour, so comparing two prompts on two days' news isn't
   fair. `--search record` saves every Tavily answer under fixtures/; `--search replay` serves those
   saved answers again (a query not seen before is searched live and added, and counted as a miss).
-- Results land in .claude/hillclimb/search/<variant>/ (git-ignored): results.jsonl (one row per
+- Results land in .claude/hillclimb/search/<variant>/ of the MAIN checkout (git-ignored), even when
+  the runner runs from a git worktree: a worktree is deleted after its PR, and paid results with it
+  (that happened once — see `results_root`). Files: results.jsonl (one row per
   case, written as each finishes, so a crash keeps the finished ones and a rerun skips them),
   traces/<case>_rep0.json (the whole exchange), errors.jsonl (cases that failed to run at all).
   The layout is the one the claude-api skill's eval report builder reads.
@@ -28,6 +30,7 @@ import json
 import math
 import os
 import shutil
+import subprocess
 import tempfile
 import time
 from datetime import date
@@ -62,7 +65,23 @@ from simba.tools.web_search import make_tavily_client, make_web_search_tool
 
 REPO_DIR = BACKEND_DIR.parent
 CASES_FILE = REPO_DIR / "evals" / "search_cases.yaml"
-FLOW_DIR = REPO_DIR / ".claude" / "hillclimb" / "search"
+
+
+def results_root() -> Path:
+    """Where eval results live: `.claude/hillclimb/` in the main checkout, never in a worktree.
+
+    Why: results are git-ignored, so deleting a worktree after its PR deletes them for good — the
+    first search baseline (and its saved Tavily answers) was lost that way. `git rev-parse
+    --git-common-dir` names the main checkout's `.git` folder from inside any worktree; its parent
+    is the main checkout. Outside git (e.g. a copied folder) it falls back to this repo.
+    """
+    found = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                           cwd=REPO_DIR, capture_output=True, text=True)
+    main_checkout = Path(found.stdout.strip()).parent if found.returncode == 0 else REPO_DIR
+    return main_checkout / ".claude" / "hillclimb"
+
+
+FLOW_DIR = results_root() / "search"
 FIXTURES_DIR = FLOW_DIR / "fixtures"
 
 # The judge: a different, stronger model than the one under test, so it doesn't grade its own kind
@@ -250,9 +269,9 @@ def trace_turns(case: dict, outcome: dict, today: date) -> list[dict]:
 # ---- the whole run --------------------------------------------------------------------------------
 
 
-def load_cases(only: str | None) -> list[dict]:
-    """All cases from the YAML file, or just the comma-separated ids in `only`."""
-    cases = yaml.safe_load(CASES_FILE.read_text())
+def load_cases(only: str | None, cases_file: Path = CASES_FILE) -> list[dict]:
+    """All cases from a YAML file (the search cases by default), or just the comma-separated ids in `only`."""
+    cases = yaml.safe_load(cases_file.read_text())
     if only:
         wanted = set(only.split(","))
         cases = [c for c in cases if c["id"] in wanted]
@@ -301,7 +320,7 @@ async def main(args: argparse.Namespace) -> None:
     classifier = None if args.fake else load_classifier()
     judge = None if (args.fake or args.no_judge) else AsyncAnthropic()
     gate = asyncio.Semaphore(CONCURRENCY)
-    print(f"{len(cases)} case(s) to run -> {variant_dir.relative_to(REPO_DIR)}  (skipping {len(done_ids)} done)")
+    print(f"{len(cases)} case(s) to run -> {variant_dir}  (skipping {len(done_ids)} done)")
 
     # 2.
     async def one(case: dict) -> None:

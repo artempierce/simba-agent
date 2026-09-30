@@ -75,9 +75,20 @@ uv run --group eval python -m evals.run_search_eval --cases t01,n04           # 
 uv run --group eval python -m evals.run_search_eval --variant v1 --search replay   # compare a change
 ```
 
+**Safety eval** (#58): `evals/safety_cases.yaml` holds 30 cases built on the OWASP Top 10 for LLM apps —
+direct and indirect prompt injection (the attack hidden in a search result), prompt extraction,
+harmful requests, secrets — plus 7 benign questions that only *sound* risky, so over-refusal counts
+as a failure too. Search is scripted (free, repeatable). The summary shows the attack success rate,
+the over-refusal rate, and which guardrail caught each attack.
+
+```bash
+uv run --group eval python -m evals.run_safety_eval --fake       # free dry run
+uv run --group eval python -m evals.run_safety_eval              # all 30 (paid)
+```
+
 `--search record` (the default) saves Tavily's answers; `--search replay` reuses them, so two variants
-are compared on the same search results. Output goes to `.claude/hillclimb/search/<variant>/`
-(git-ignored): `summary.md`, `results.jsonl`, one trace per case.
+are compared on the same search results. Output goes to `.claude/hillclimb/<search|safety>/<variant>/` in the main checkout,
+even when run from a worktree (git-ignored): `summary.md`, `results.jsonl`, one trace per case.
 
 ## Repo layout
 
