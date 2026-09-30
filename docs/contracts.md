@@ -90,7 +90,7 @@ Every node calls `emit_trace(stage, status, detail, start, tokens)` **exactly on
  "ms": 640, "input_tokens": 212, "output_tokens": 31, "cost_usd": 0.000367}
 ```
 
-`stage` ∈ `before_model | agent | before_tool | web_search | after_tool | remember | after_model | refuse | budget` (`budget` is sent by api.py, not a node — § 9; `intent`/`reason`/`generate` on chats saved
+`stage` ∈ `before_model | agent | before_tool | web_search | after_tool | remember | list_memory | update_memory | forget_memory | after_model | summarize | refuse | budget` (`budget` is sent by api.py, not a node — § 9; `intent`/`reason`/`generate` on chats saved
 before #33; `guard`/`output_guard` on chats saved before #32; `echo` existed in steps 1–4 only).
 `status` ∈ `ok | blocked | error | flagged` (`flagged` = passed, but a hook raised a flag — shown as ⚑
 in the trace panel, in the guard colour, not the error colour). Detail formats are given per node in
@@ -363,11 +363,24 @@ TEXT, created_at TEXT, updated_at TEXT)`. `KINDS = ("user", "feedback", "project
 | PATCH | `/api/memory/facts/{id}` | any of `kind`, `text`, `why` | `fact` (Undo of an update); 404 unknown id |
 | DELETE | `/api/memory/facts/{id}` | – | 204 (Undo of a save); 404 unknown id |
 
+| GET | `/api/memory/summaries` | – | `[{"chat_id", "title", "summary", "topic", "turns", "updated_at"}]` (#82, Past chats) |
+
 No add or delete-all route (#87, D46): memory is changed by talking, through the memory tools.
 `core_profile() -> {"user": [...], "feedback": [...]}` (≤ `CORE_PROFILE_LIMIT` each, `ALWAYS_LOADED`);
 the agent's `profile_block(profile)` renders one `<memory>` block with a heading per kind.
 `memory_pending(chat_id PK, target TEXT json ids | "all", human_turn INTEGER)`: `set_pending`,
 `get_pending`, `clear_pending`; `delete_facts(ids) -> [deleted facts]`; `is_clear_yes(text)`.
+
+**Episodic (#82, D41)** — `chat_summaries(chat_id PK, summary, topic, turns, updated_at)`: `get_summary`,
+`save_summary(chat_id, summary, turns)` (topic = first line without "Topic:"), `list_summaries(limit?)` (joins
+`chats` for the title; falls back to the chat id without that table), `delete_summary` (chats_api's delete
+calls it). `core_profile()` adds `"recent_chats"`: the newest `RECENT_CHATS_IN_PROMPT` = 20 as
+`"{d Mon} · {title} — {topic}"`. Node `summarize` (`nodes/summarize.py`, `make_summarize_node(model,
+store)`): runs after `after_model` when `build_graph(..., summarize=...)` is given; returns `{}` at once
+unless `needs_summary(covered, owner_turns)` (≥ `SUMMARY_EVERY` = 6 new owner turns); else one
+`model.ainvoke([SystemMessage(summary.md), HumanMessage(<previous_summary>…<conversation>…)])` over the
+human/ai text since the covered turns (capped at 12,000 chars, both fenced + neutralised), saves it,
+and emits trace `summarize`, `ok`, `"{first summary|updated} · {n} turns · {w} words"` with its tokens.
 
 Guards: `<memory>` is an internal tag — `fake-tags` blocks it in input, `no_internal_tags` in output.
 

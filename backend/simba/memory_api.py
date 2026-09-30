@@ -41,6 +41,13 @@ async def list_facts(request: Request) -> list[dict]:
     return await request.app.state.memory.list_facts()
 
 
+@router.get("/summaries")
+async def list_summaries(request: Request) -> list[dict]:
+    """GET /api/memory/summaries -> every chat summary with its chat's title, newest first (#82: the
+    Memory page's "Past chats")."""
+    return await request.app.state.memory.list_summaries()
+
+
 @router.patch("/facts/{fact_id}")
 async def update_fact(fact_id: int, body: FactChange, request: Request) -> dict:
     """PATCH /api/memory/facts/{id} -> the changed fact; 404 for an unknown id. Used by Undo to put

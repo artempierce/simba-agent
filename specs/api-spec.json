@@ -49,6 +49,12 @@
         "responses": { "200": { "description": "The facts.", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/Fact" } } } } } }
       }
     },
+    "/api/memory/summaries": {
+      "get": {
+        "tags": ["memory"], "operationId": "listSummaries", "summary": "Every chat summary, newest first (#82)",
+        "responses": { "200": { "description": "The summaries.", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/ChatSummary" } } } } } }
+      }
+    },
     "/api/memory/facts/{fact_id}": {
       "parameters": [ { "name": "fact_id", "in": "path", "required": true, "schema": { "type": "integer" } } ],
       "patch": {
@@ -203,6 +209,18 @@
           "why": { "type": ["string", "null"] },
           "source_chat_id": { "type": ["string", "null"] },
           "created_at": { "type": "string" },
+          "updated_at": { "type": "string" }
+        }
+      },
+      "ChatSummary": {
+        "type": "object",
+        "required": ["chat_id", "title", "summary", "topic", "turns", "updated_at"],
+        "properties": {
+          "chat_id": { "type": "string" },
+          "title": { "type": "string" },
+          "summary": { "type": "string", "description": "Topic / Decided or learned / Open / Preferences stated / Dates, one line each" },
+          "topic": { "type": "string" },
+          "turns": { "type": "integer", "description": "How many owner turns the summary covers" },
           "updated_at": { "type": "string" }
         }
       },
