@@ -7,9 +7,11 @@ at Acme") and the agent uses these tools, the way Claude Code uses its file tool
 Every call goes through the same loop as a search — agent → before_tool (code checks) → tools → agent —
 so it shows in the trace, and the checks in harness/tool_hooks.py run first.
 
-The four tools:
+The five tools:
   remember       save a lasting fact; a reworded repeat updates the old one (M2)
   list_memory    read what's saved, with ids — read-only
+  recall_memory  find things by keyword across facts and chat summaries, or open one past chat's full
+                 summary by the id the prompt's index shows (#83, D50) — read-only
   update_memory  rewrite one fact by id, e.g. after a correction
   forget_memory  delete facts (or everything) — two steps: the first call only parks the request and
                  tells the agent to ask; the delete happens when the owner's very next message is a
@@ -50,7 +52,7 @@ def _chat_id(config: RunnableConfig) -> str | None:
 
 
 def make_memory_tools(store: MemoryStore) -> list[BaseTool]:
-    """Build the four memory tools bound to one MemoryStore (api.py passes the app's store).
+    """Build the memory tools bound to one MemoryStore (api.py passes the app's store).
 
     Why a factory: a LangChain tool receives only the model's arguments (plus what LangGraph injects:
     the run config, the graph state); the closure carries the store in.
@@ -94,6 +96,37 @@ def make_memory_tools(store: MemoryStore) -> list[BaseTool]:
             for f in facts
         )
         return f"<memory>\n{lines}\n</memory>"
+
+    @tool("recall_memory")
+    async def recall_memory(query: str | None = None, chat: str | None = None) -> str:
+        """Look something up in your memory of earlier chats and saved facts.
+
+        chat: the id shown in "Recent chats" (e.g. "3f2a91") to read that chat's full summary.
+        query: a few keywords to search every saved fact and chat summary, e.g. "Lisbon stay". If
+        nothing turns up, try other words (a synonym, a name) before saying you don't remember.
+        """
+        started = time.perf_counter()
+        # 1. Open one chat's summary by its id (like opening a memory file from the index).
+        if chat:
+            found = await store.summary_by_prefix(chat)
+            if len(found) != 1:
+                emit_trace("recall_memory", "ok", f"chat {chat} · {'ambiguous' if found else 'not found'}", started)
+                return (f"More than one chat starts with {chat}; give more characters of its id."
+                        if found else f"No saved summary for chat {chat}.")
+            s = found[0]
+            emit_trace("recall_memory", "ok", f'chat · "{s["title"]}"'[:MAX_TRACE_DETAIL_CHARS], started)
+            return (f"<memory>\nChat \"{neutralise_tag(s['title'], 'memory')}\" (last updated {s['updated_at'][:10]}, "
+                    f"{s['turns']} messages):\n{neutralise_tag(s['summary'], 'memory')}\n</memory>")
+        # 2. Keyword search over facts and summaries (MemoryStore.search), best first.
+        hits = await store.search(query or "")
+        emit_trace("recall_memory", "ok", f'{len(hits)} result(s) · "{query}"'[:MAX_TRACE_DETAIL_CHARS], started)
+        if not hits:
+            return "Nothing found for those words. Try other words, or say you don't remember."
+        lines = [
+            f"[{'fact ' + h['ref'] if h['source'] == 'fact' else 'chat ' + h['ref'][:6]}] {neutralise_tag(h['text'], 'memory')}"
+            for h in hits
+        ]
+        return "<memory>\n" + "\n".join(lines) + "\n</memory>"
 
     @tool("update_memory")
     async def update_memory(fact_id: int, text: str, why: str | None = None) -> str:
@@ -163,5 +196,5 @@ def make_memory_tools(store: MemoryStore) -> list[BaseTool]:
                 "Only a clear yes in their next message lets you delete; then call forget_memory again "
                 "with the same arguments.")
 
-    return [remember, list_memory, update_memory, forget_memory]
+    return [remember, list_memory, recall_memory, update_memory, forget_memory]
 

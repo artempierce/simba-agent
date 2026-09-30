@@ -10,6 +10,10 @@ Key ideas:
 - A fact has a kind, the same four Claude Code uses for its own memory (see KINDS). `user` facts
   (the profile, D43) and `feedback` facts (learned "how to work with me" rules — procedural memory,
   D48) go into every prompt; `project` and `reference` facts are looked up when needed.
+- Recall (#83, D50), the way Claude Code's memory works — no embedding model: the prompt's index of
+  recent chats carries a short id per chat ("[c:3f2a91] …"), `summary_by_prefix` opens one chat's full
+  summary by that id, and `search` is keyword search (SQLite FTS5, BM25) over every fact and summary.
+  Claude matches meaning when it reads the index; the search finds exact words.
 - Episodic memory (#82, D41): each chat keeps one rolling summary (`chat_summaries`), rewritten every
   SUMMARY_EVERY owner turns by the summarize node. The prompt gets a one-line index of the most
   recent ones (RECENT_CHATS_IN_PROMPT); the full text is read on demand (M4's recall).
@@ -49,6 +53,14 @@ CORE_PROFILE_LIMIT = 15
 # #82: how many recent chat summaries the prompt lists, one line each (date · title · topic). Enough to
 # spot "we talked about that last week"; the full summary is looked up when needed (M4).
 RECENT_CHATS_IN_PROMPT = 20
+
+# #83: how many matches one recall_memory search returns, best first. Enough to find the right fact or
+# chat; few enough that a recall stays a short read for the model.
+SEARCH_RESULTS = 5
+
+# #83: how many characters of a chat id the prompt's index shows ("[c:3f2a91]"). Chat ids are 32 hex
+# characters; 6 keep the index short and are unique in practice (recall checks, and says if not).
+CHAT_REF_CHARS = 6
 
 # #82: a chat's summary is rewritten after this many new owner turns (D41). Six is often enough that
 # leaving a chat never loses much, rarely enough that summaries cost about one small call per 6 turns.
@@ -138,6 +150,23 @@ class MemoryStore:
                 turns INTEGER NOT NULL, updated_at TEXT NOT NULL
             )"""
         )
+        # #83: the keyword index over facts and summaries (SQLite FTS5 — full-text search built into
+        # SQLite). `source` is "fact" or "chat", `ref` the fact id or chat id; only `text` is searched.
+        # Triggers keep it in step with every insert, update and delete, and it's rebuilt at start-up,
+        # so it can never drift from the real tables.
+        await db.execute(
+            """CREATE VIRTUAL TABLE IF NOT EXISTS memory_search USING fts5(
+                source UNINDEXED, ref UNINDEXED, text, tokenize = 'unicode61 remove_diacritics 2'
+            )"""
+        )
+        for statement in _SEARCH_TRIGGERS:
+            await db.execute(statement)
+        await db.execute("DELETE FROM memory_search")
+        await db.execute(
+            "INSERT INTO memory_search (source, ref, text) "
+            "SELECT 'fact', id, kind || ': ' || text || ' ' || coalesce(why, '') FROM memory_facts"
+        )
+        await db.execute("INSERT INTO memory_search (source, ref, text) SELECT 'chat', chat_id, summary FROM chat_summaries")
         # #87: at most one forget request waiting for a "yes", per chat. `target` is a JSON list of
         # fact ids, or "all"; `human_turn` is how many owner messages the chat had when it was asked.
         await db.execute(
@@ -247,7 +276,7 @@ class MemoryStore:
             )
             profile[kind] = [text for (text,) in await cursor.fetchall()]
         profile["recent_chats"] = [
-            f"{_day(s['updated_at'])} · {s['title']} — {s['topic']}"
+            f"[c:{s['chat_id'][:CHAT_REF_CHARS]}] {_day(s['updated_at'])} · {s['title']} — {s['topic']}"
             for s in await self.list_summaries(RECENT_CHATS_IN_PROMPT)
         ]
         return profile
@@ -264,8 +293,12 @@ class MemoryStore:
         """Store (or replace) a chat's rolling summary; its first line becomes the topic for the index."""
         summary = summary.strip()
         topic = summary.splitlines()[0].removeprefix("Topic:").strip()[:MAX_FACT_CHARS] if summary else ""
+        # An upsert, not INSERT OR REPLACE: REPLACE deletes the old row without firing delete
+        # triggers, which would leave the old summary in the search index (#83).
         await self._db.execute(
-            "INSERT OR REPLACE INTO chat_summaries (chat_id, summary, topic, turns, updated_at) VALUES (?, ?, ?, ?, ?)",
+            """INSERT INTO chat_summaries (chat_id, summary, topic, turns, updated_at) VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(chat_id) DO UPDATE SET summary = excluded.summary, topic = excluded.topic,
+               turns = excluded.turns, updated_at = excluded.updated_at""",
             (chat_id, summary, topic, turns, _now()),
         )
         await self._db.commit()
@@ -295,6 +328,38 @@ class MemoryStore:
                 (limit_value,),
             )
         return [dict(zip(keys, row)) for row in await cursor.fetchall()]
+
+    async def search(self, query: str, limit: int = SEARCH_RESULTS) -> list[dict]:
+        """Keyword search over every fact and chat summary (#83): best matches first.
+
+        1. Keep only the words of the query (letters and digits), so nothing the model writes can be
+           read as FTS5 syntax (quotes, AND/NEAR, *, column filters).
+        2. Match any of those words; FTS5's bm25() ranks rows higher the more — and the rarer — the
+           words they share with the query. Lower bm25 is better.
+        Returns [{"source": "fact" | "chat", "ref": fact id or chat id, "text": str}], at most `limit`.
+
+        Example: search("where to stay in Lisbon?") matches "Decided: stay in Alfama, Lisbon".
+        """
+        # 1.
+        words = [w for w in re.findall(r"\w+", query.lower()) if len(w) > 1][:12]
+        if not words:
+            return []
+        # 2.
+        match = " OR ".join(f'"{w}"' for w in words)
+        cursor = await self._db.execute(
+            "SELECT source, ref, text FROM memory_search WHERE memory_search MATCH ? ORDER BY bm25(memory_search) LIMIT ?",
+            (match, limit),
+        )
+        return [{"source": source, "ref": str(ref), "text": text} for source, ref, text in await cursor.fetchall()]
+
+    async def summary_by_prefix(self, prefix: str) -> list[dict]:
+        """Chat summaries whose chat id starts with `prefix` (the index shows 6 characters). Only hex
+        characters are used, so the prefix can't carry SQL LIKE wildcards. A result of more than one
+        means the prefix is ambiguous — the caller asks for more characters."""
+        prefix = "".join(ch for ch in prefix.lower() if ch in "0123456789abcdef")
+        if len(prefix) < 4:
+            return []
+        return [s for s in await self.list_summaries() if s["chat_id"].startswith(prefix)]
 
     async def delete_summary(self, chat_id: str) -> None:
         """Forget a chat's summary (called when the chat itself is deleted)."""
@@ -331,6 +396,28 @@ class MemoryStore:
     async def close(self) -> None:
         """Close the database connection (api.py's lifespan calls this on shutdown)."""
         await self._db.close()
+
+
+# #83: keep memory_search in step with the two tables it indexes. The fact's kind and reason are
+# searchable too ("feedback", "why: said so").
+_SEARCH_TRIGGERS = (
+    """CREATE TRIGGER IF NOT EXISTS memory_facts_ai AFTER INSERT ON memory_facts BEGIN
+         INSERT INTO memory_search (source, ref, text)
+         VALUES ('fact', new.id, new.kind || ': ' || new.text || ' ' || coalesce(new.why, '')); END""",
+    """CREATE TRIGGER IF NOT EXISTS memory_facts_au AFTER UPDATE ON memory_facts BEGIN
+         DELETE FROM memory_search WHERE source = 'fact' AND ref = old.id;
+         INSERT INTO memory_search (source, ref, text)
+         VALUES ('fact', new.id, new.kind || ': ' || new.text || ' ' || coalesce(new.why, '')); END""",
+    """CREATE TRIGGER IF NOT EXISTS memory_facts_ad AFTER DELETE ON memory_facts BEGIN
+         DELETE FROM memory_search WHERE source = 'fact' AND ref = old.id; END""",
+    """CREATE TRIGGER IF NOT EXISTS chat_summaries_ai AFTER INSERT ON chat_summaries BEGIN
+         INSERT INTO memory_search (source, ref, text) VALUES ('chat', new.chat_id, new.summary); END""",
+    """CREATE TRIGGER IF NOT EXISTS chat_summaries_au AFTER UPDATE ON chat_summaries BEGIN
+         DELETE FROM memory_search WHERE source = 'chat' AND ref = old.chat_id;
+         INSERT INTO memory_search (source, ref, text) VALUES ('chat', new.chat_id, new.summary); END""",
+    """CREATE TRIGGER IF NOT EXISTS chat_summaries_ad AFTER DELETE ON chat_summaries BEGIN
+         DELETE FROM memory_search WHERE source = 'chat' AND ref = old.chat_id; END""",
+)
 
 
 def _day(iso: str) -> str:

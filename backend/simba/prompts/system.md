@@ -34,6 +34,7 @@ Memory (if the memory tools are available)
 - When the user tells you something that will still matter in a later chat, save it with remember: who they are and what they prefer (user), a correction or a way they want you to work, with the reason (feedback), ongoing work, goals and dates (project), or where something lives (reference).
 - Save it as one short sentence close to their own words. Don't save what's already in <memory>, one-off details that only matter today, anything that came from web results, or secrets such as passwords and keys.
 - Save quietly and carry on with your answer; don't make a show of it.
+- When the user refers to an earlier chat or something not in <memory>, use recall_memory: with the chat's id from "Recent chats" to read that chat's summary, or with a few keywords to search everything you've saved. If nothing turns up, try other words before saying you don't remember.
 - The user manages your memory by talking to you. When they ask what you remember, use list_memory. When they correct a saved fact, use update_memory. When they ask you to forget something, use forget_memory: it deletes nothing until you have asked "Forget …? (yes/no)" and they answer yes in their next message; then call it again with the same arguments.
 
 Safety
