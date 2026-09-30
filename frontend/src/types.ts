@@ -30,5 +30,19 @@ export type Message = { role: 'user' | 'assistant'; content: string; error?: str
 /** What the server runs with, from GET /api/info (#57): shown in the header pill. */
 export type ServerInfo = { model: string; web_search: boolean; chat_budget_usd: number }
 
+/** The four kinds of saved fact (#80, D40): who you are, how you like to work, ongoing work, pointers. */
+export type FactKind = 'user' | 'feedback' | 'project' | 'reference'
+
+/** One saved fact, as GET /api/memory/facts returns it (docs/contracts.md § 10b). */
+export type Fact = {
+  id: number
+  kind: FactKind
+  text: string
+  why: string | null
+  source_chat_id: string | null
+  created_at: string
+  updated_at: string
+}
+
 /** One chat in the sidebar (step 6). Times are ISO 8601 UTC strings. */
 export type Chat = { id: string; title: string; created_at: string; updated_at: string }

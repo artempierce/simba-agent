@@ -126,7 +126,9 @@ INJECTION_RULES: dict[str, re.Pattern[str]] = {
     # "no match", which blocks the whole async event loop. Nesting the second `\s*` inside the optional
     # `/` group removes the ambiguity (it only runs when a "/" was actually found), so there's exactly
     # one way to match and the check is linear again (see the timing test in tests/test_guard.py).
-    "fake-tags": re.compile(r"<\s*(?:/\s*)?(system|assistant|untrusted_retrieval|user_message)\b[^>]*>", re.IGNORECASE),
+    # #80: "memory" is the fence around saved facts in the agent's prompt (agent.profile_block); a user
+    # typing <memory>…</memory> could otherwise pass off made-up "saved facts" as the real block.
+    "fake-tags": re.compile(r"<\s*(?:/\s*)?(system|assistant|untrusted_retrieval|user_message|memory)\b[^>]*>", re.IGNORECASE),
 }
 
 

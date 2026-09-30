@@ -10,6 +10,7 @@ Endpoints:
 
     GET  /api/health   liveness check for the frontend/dev loop: {"ok": true}
     GET  /api/info     what this server runs with (model, web search on/off, chat budget) — #57
+         /api/memory   the Memory tab: list, add, edit, delete facts, forget all (memory_api.py) — #80
     POST /api/chat      send one message; the reply streams back as SSE
          /api/chats     the chat list: list, create, open, rename, delete (chats_api.py, § 10)
 
@@ -48,6 +49,8 @@ from pydantic import BaseModel
 
 from simba.chats import ChatStore, title_from
 from simba.chats_api import router as chats_router
+from simba.memory import MemoryStore
+from simba.memory_api import router as memory_router
 from simba.common import ms_since, text_of
 from simba.graph import build_graph
 from simba.harness.classifier import InjectionClassifier, load_classifier
@@ -132,20 +135,25 @@ def create_app(
         resolved_db_path.parent.mkdir(parents=True, exist_ok=True)
         async with AsyncSqliteSaver.from_conn_string(str(resolved_db_path)) as checkpointer:
             chats = await ChatStore.open(str(resolved_db_path))
+            memory = await MemoryStore.open(str(resolved_db_path))  # #80: same file, its own table
             try:
                 # #8: the real classifier (if asked for) is loaded here, at start-up, not above in
                 # create_app's own body — see the `load_real_classifier` docstring above.
                 resolved_classifier = load_classifier() if load_real_classifier else classifier
                 app.state.checkpointer = checkpointer
                 app.state.chats = chats
+                app.state.memory = memory
                 graph_options = {"web_search_tool": resolved_web_search_tool} if resolved_web_search_tool else {}
-                app.state.graph = build_graph(chat_model, checkpointer, resolved_classifier, **graph_options)
+                app.state.graph = build_graph(chat_model, checkpointer, resolved_classifier,
+                                              load_profile=memory.core_profile, **graph_options)
                 yield
             finally:
                 await chats.close()
+                await memory.close()
 
     app = FastAPI(title="Simba", lifespan=lifespan)
     app.include_router(chats_router)
+    app.include_router(memory_router)
 
     @app.get("/api/health")
     async def health():

@@ -26,12 +26,15 @@ import { streamChat } from './api'
 import { deleteChat, getChat, getInfo, listChats, renameChat } from './chatsApi'
 import { ChatView } from './components/ChatView'
 import { InfoPill } from './components/InfoPill'
+import { LeftPane, type LeftTab } from './components/LeftPane'
+import { MemoryPanel } from './components/MemoryPanel'
 import { MobileDrawer } from './components/MobileDrawer'
 import { Sidebar } from './components/Sidebar'
 import { SimbaAvatar } from './components/SimbaAvatar'
 import { TracePanel } from './components/TracePanel'
+import { addFact, deleteAllFacts, deleteFact, listFacts, updateFact } from './memoryApi'
 import { moodFor } from './mood'
-import type { Chat, Message, Run, ServerInfo } from './types'
+import type { Chat, Fact, FactKind, Message, Run, ServerInfo } from './types'
 
 export default function App() {
   const [chatId, setChatId] = useState<string | null>(null) // null = a new, unsaved chat
@@ -42,6 +45,8 @@ export default function App() {
   const [chatsError, setChatsError] = useState<string | null>(null) // last chatsApi failure, shown in a banner
   const [drawerOpen, setDrawerOpen] = useState(false) // mobile-only overlay showing the Sidebar
   const [info, setInfo] = useState<ServerInfo | null>(null) // model + search on/off for the header pill (#57)
+  const [leftTab, setLeftTab] = useState<LeftTab>('chats') // which left-pane tab is showing (#80)
+  const [facts, setFacts] = useState<Fact[]>([]) // the Memory tab's saved facts (#80)
 
   // See the file header comment: these mirror state for async handlers to re-check after an await.
   const busyRef = useRef(false)
@@ -85,6 +90,35 @@ export default function App() {
     // oxlint-disable-next-line react/set-state-in-effect -- setState only runs after an await, never synchronously
     refreshChats()
   }, [])
+
+  /**
+   * Memory tab (#80): reload the facts from the server. Called when the tab opens and after every
+   * change, so the list always shows what the server really stored (it trims and may reject text).
+   * A failure goes to the same banner as chat errors.
+   */
+  async function refreshFacts() {
+    try {
+      setFacts(await listFacts())
+    } catch (e) {
+      reportChatsError(e)
+    }
+  }
+
+  /** Run one memory change, then reload the list; errors go to the banner. */
+  async function changeMemory(change: () => Promise<unknown>) {
+    try {
+      await change()
+    } catch (e) {
+      reportChatsError(e)
+    }
+    await refreshFacts()
+  }
+
+  /** Switch the left-pane tab; opening Memory loads the latest facts. */
+  function openTab(tab: LeftTab) {
+    setLeftTab(tab)
+    if (tab === 'memory') void refreshFacts()
+  }
 
   // Load the server's setup once, for the header pill (#57). A failure is ignored on purpose: the
   // pill is a hint, so the header simply shows without it.
@@ -220,14 +254,31 @@ export default function App() {
     }
   }
 
+  // The left pane (#80): the chat list and the Memory tab. Rendered in the grid at md+ and inside the
+  // mobile drawer below that — one element, so both places show the same tab.
   const sidebar = (
-    <Sidebar
-      chats={chats}
-      activeId={chatId}
-      onSelect={selectChat}
-      onNew={newChat}
-      onRename={renameChatById}
-      onDelete={deleteChatById}
+    <LeftPane
+      tab={leftTab}
+      onTab={openTab}
+      chats={
+        <Sidebar
+          chats={chats}
+          activeId={chatId}
+          onSelect={selectChat}
+          onNew={newChat}
+          onRename={renameChatById}
+          onDelete={deleteChatById}
+        />
+      }
+      memory={
+        <MemoryPanel
+          facts={facts}
+          onAdd={(kind: FactKind, text: string) => changeMemory(() => addFact(kind, text))}
+          onEdit={(id: number, text: string) => changeMemory(() => updateFact(id, text))}
+          onDelete={(id: number) => changeMemory(() => deleteFact(id))}
+          onDeleteAll={() => changeMemory(deleteAllFacts)}
+        />
+      }
     />
   )
 
