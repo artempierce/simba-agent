@@ -17,6 +17,7 @@ normalisation, #64 safety-eval follow-ups. Phase 2: #65 tool manifests, #66 appr
 - #39 subagents (needs owner answers) · #13 / #14 memory designs
 
 ## Recently done
+#74 honesty section in `system.md`: no made-up answers, false premises corrected ·
 #72 #73 DeepEval benchmark (30 cases, targets) + DeepTeam red teaming, built not run (`evals/deepeval/`) ·
 #63 guard folds spelling tricks (look-alike letters, accents, spaced letters, leetspeak, line breaks) ·
 #64 warm fixed refusal (D39); safety eval grades the fixed refusal in code ·
