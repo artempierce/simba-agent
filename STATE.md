@@ -14,10 +14,11 @@ normalisation, #64 safety-eval follow-ups. Phase 2: #65 tool manifests, #66 appr
 
 ## Next up (post-MVP)
 - #30 Self-improvement (propose → approve → install), after the tool and approval design is ready
-- Memory: #83 M4 recall (local embeddings + keyword) (M1 #80, M2 #81, M2b #87, M3 #82 done)
+- Memory done (M1–M4: #80 #81 #87 #82 #83); parked: #90 vector recall
 - #39 subagents (needs owner answers)
 
 ## Recently done
+#83 memory M4: `recall_memory` — open a chat by id, keyword search (FTS5); no embeddings (D50; vector design parked in #90) ·
 #82 memory M3: rolling chat summary every 6 owner turns (summarize node, `prompts/summary.md`), recent-chats index in the prompt, Past chats page ·
 #87 memory by talking (list / update / two-step forget), feedback rules always loaded, read-only Memory page; D46–D49 ·
 #55 search prompt: "When to search" principles (merged without an eval run; owner tests by hand) ·

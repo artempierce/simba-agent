@@ -90,7 +90,7 @@ Every node calls `emit_trace(stage, status, detail, start, tokens)` **exactly on
  "ms": 640, "input_tokens": 212, "output_tokens": 31, "cost_usd": 0.000367}
 ```
 
-`stage` ∈ `before_model | agent | before_tool | web_search | after_tool | remember | list_memory | update_memory | forget_memory | after_model | summarize | refuse | budget` (`budget` is sent by api.py, not a node — § 9; `intent`/`reason`/`generate` on chats saved
+`stage` ∈ `before_model | agent | before_tool | web_search | after_tool | remember | list_memory | recall_memory | update_memory | forget_memory | after_model | summarize | refuse | budget` (`budget` is sent by api.py, not a node — § 9; `intent`/`reason`/`generate` on chats saved
 before #33; `guard`/`output_guard` on chats saved before #32; `echo` existed in steps 1–4 only).
 `status` ∈ `ok | blocked | error | flagged` (`flagged` = passed, but a hook raised a flag — shown as ⚑
 in the trace panel, in the guard colour, not the error colour). Detail formats are given per node in
@@ -370,6 +370,15 @@ No add or delete-all route (#87, D46): memory is changed by talking, through the
 the agent's `profile_block(profile)` renders one `<memory>` block with a heading per kind.
 `memory_pending(chat_id PK, target TEXT json ids | "all", human_turn INTEGER)`: `set_pending`,
 `get_pending`, `clear_pending`; `delete_facts(ids) -> [deleted facts]`; `is_clear_yes(text)`.
+
+**Recall (#83, D50)** — FTS5 table `memory_search(source UNINDEXED "fact"|"chat", ref UNINDEXED, text)`, kept in
+step by triggers on `memory_facts` (text = `kind: text why`) and `chat_summaries` (text = summary), rebuilt at
+`open()`; `save_summary` is an upsert (REPLACE would skip the delete trigger). `search(query, limit=5)`: query
+reduced to `\w+` words (> 1 char, ≤ 12), OR-matched, ordered by `bm25`, -> `[{"source", "ref", "text"}]`.
+`summary_by_prefix(prefix)` (hex only, ≥ 4 chars) -> matching summaries. The recent-chats index lines start
+`[c:{chat_id[:6]}] `. Tool `recall_memory(query?, chat?)`: `chat` opens one summary (`<memory>Chat "title" (…)`),
+else keyword search (`<memory>[fact 12] … / [chat 3f2a91] …</memory>`); trace `recall_memory` with
+`chat · "title"` or `{n} result(s) · "query"`.
 
 **Episodic (#82, D41)** — `chat_summaries(chat_id PK, summary, topic, turns, updated_at)`: `get_summary`,
 `save_summary(chat_id, summary, turns)` (topic = first line without "Topic:"), `list_summaries(limit?)` (joins

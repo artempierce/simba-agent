@@ -40,6 +40,7 @@ never blocks on its own: it tells the agent to look carefully, and the LLM makes
 | M2 | Memory: Simba remembers by itself (`remember` tool, code limits), "Remembered · Undo" (#81) | done |
 | M2b | Memory by talking: "what do you remember?", corrections, forget with a yes; learned rules always loaded; Memory page (#87) | done |
 | M3 | Episodic memory: a rolling summary per chat every 6 messages; recent chats in the prompt; Past chats on the Memory page (#82) | done |
+| M4 | Recall like Claude Code: open a past chat by id, keyword search over memory; no embedding model (#83, D50) | done |
 | — | Harness redesign: guard/output_guard become before_model/after_model hooks (#32) | done |
 | — | Harness redesign: intent + reason + generate become one `agent` node (#33) | done |
 | 17 | First read-only tool: optional Tavily web search + ReAct loop | in progress |

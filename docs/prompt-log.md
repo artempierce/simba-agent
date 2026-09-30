@@ -3,6 +3,14 @@
 Why `backend/simba/prompts/system.md` changed, newest first. One entry per change: what, why, and how
 it was checked. (#10 asked for this before/after log.)
 
+## 2026-09-30 — recall past chats (#83)
+
+- **Added:** when the user refers to an earlier chat or something not in <memory>, use recall_memory — with
+  the chat id from "Recent chats" to read its summary, or with keywords to search; try other words before
+  saying you don't remember.
+- **Why:** D50 — recall the way Claude Code's memory works: index + open by id + keyword search.
+- **Checked:** backend tests with the fake model; no paid runs.
+
 ## 2026-09-30 — memory by talking (#87)
 
 - **Changed:** the Memory section now covers the "how the user wants you to work" notes (follow them),

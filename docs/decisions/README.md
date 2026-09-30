@@ -50,7 +50,7 @@ and are recorded here first; the design book catches up at its next sync.
 | D39 | Refusal text: "Sorry, I can't help with that one. I'm happy to help with something else, though!" — warm, fixed, no joke (replaces D8) | accepted | Sol, 29 Sep, #64 |
 | D40 | Facts are saved automatically by a `remember(kind, fact, why)` tool in the agent's call, using four kinds (user, feedback, project, reference); limits live in code: only this turn's user words, never after reading web content, size cap, dedupe, trace + Undo (replaces the approve-each idea in #14) | accepted | Sol, 30 Sep, #79 Q1 |
 | D41 | Each chat keeps a rolling summary, updated every 6 turns by one model call from a fixed template | accepted | Sol, 30 Sep, #79 Q2 |
-| D42 | Recall is hybrid: an index of recent chat summaries in the prompt, plus a `recall_memory` tool that searches with local embeddings and keywords (no API cost) | accepted | Sol, 30 Sep, #79 Q3 |
+| D42 | Recall is hybrid: an index of recent chat summaries in the prompt, plus a `recall_memory` tool that searches with local embeddings and keywords (no API cost) | replaced by D50 (parked design: `D42-hybrid-vector-recall.md`) | Sol, 30 Sep, #79 Q3 |
 | D43 | A core profile of up to 15 `user` facts is always in the prompt; everything else is recalled on demand | accepted | Sol, 30 Sep, #79 Q4 |
 | D44 | Memory is managed in a Memory tab in the sidebar: view, add, edit, delete, delete all | accepted | Sol, 30 Sep, #79 Q5 |
 | D45 | Memory text (facts, summaries, recall results) is data inside a fenced block, never instructions | accepted | Sol, 30 Sep, #79 |
@@ -58,6 +58,7 @@ and are recorded here first; the design book catches up at its next sync.
 | D47 | Forgetting is two-step: Simba asks, and only the owner's clear yes in the very next message deletes; checked in code | accepted | Sol, 30 Sep, #87 |
 | D48 | Learned procedural memory: up to 15 `feedback` facts are always in the prompt, next to the `user` profile | accepted | Sol, 30 Sep, #87 |
 | D49 | A read-only Memory page behind header tabs Chat \| Memory replaces the sidebar Memory tab | accepted | Sol, 30 Sep, #87 |
+| D50 | Recall without an embedding model, like Claude Code's memory: an index of recent chats (with short ids) always in the prompt, `recall_memory(query)` keyword search (SQLite FTS5, BM25) over facts and summaries, `recall_memory(chat=id)` opens one chat's full summary; Claude matches meaning when it reads the index (replaces D42) | accepted | Sol, 30 Sep, #83 |
 
 ## Template for a decision file
 

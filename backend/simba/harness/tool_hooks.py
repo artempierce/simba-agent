@@ -26,7 +26,7 @@ TOPICS = ("general", "news")
 TIME_RANGES = ("day", "week", "month", "year")
 
 # #81, #87: the tools the model may call. Everything else is denied before it can run.
-ALLOWED_TOOLS = ("web_search", "remember", "list_memory", "update_memory", "forget_memory")
+ALLOWED_TOOLS = ("web_search", "remember", "list_memory", "recall_memory", "update_memory", "forget_memory")
 
 # #87: the memory tools that change memory, and which argument holds the new text (None: no text).
 MEMORY_WRITES = {"remember": "fact", "update_memory": "text", "forget_memory": None}
