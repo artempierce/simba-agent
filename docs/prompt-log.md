@@ -21,6 +21,17 @@ it was checked. (#10 asked for this before/after log.)
   label opinions and estimates.
 - **Why:** owner request — Simba should never make up an answer when there are no facts behind it.
 - **Checked:** backend tests (fake model); benchmark honesty cases f01–f04 (#72) when the owner OKs a run.
+## 2026-09-29 — when and how to search (#55)
+
+- **Before:** one line: "If web_search is available, use it for current information… Cite source URLs…"
+- **After:** a "When to search" section of principles: search when the answer depends on something that
+  changes (news, prices, weather, scores, versions, who holds a job); don't search for things that
+  don't change; search when unsure; judge "latest" from today's date ("latest news" = today's), news
+  topic + time range, no year in the query; check result dates and search again or say what's old;
+  a source link next to each fact; never claim to have no live access.
+- **Why:** the search eval baseline (#54) failed on missing links (7 cases), "latest" read as this week
+  (t01, t02) and no search for live weather (t03, and the safety eval's i04).
+- **Checked:** search eval rerun with `--search replay` against a fresh baseline (see PR).
 
 ## 2026-09-29 — personality: warm, upbeat, a little funny (#10)
 
