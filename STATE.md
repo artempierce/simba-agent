@@ -14,10 +14,12 @@ normalisation, #64 safety-eval follow-ups. Phase 2: #65 tool manifests, #66 appr
 
 ## Next up (post-MVP)
 - #30 Self-improvement (propose → approve → install), after the tool and approval design is ready
-- #39 subagents (needs owner answers) · #13 / #14 memory designs
+- Memory: #80 M1 fact store + Memory tab · #81 M2 remember tool · #82 M3 rolling summaries · #83 M4 recall
+- #39 subagents (needs owner answers)
 
 ## Recently done
 #80 memory M1: fact store, Memory tab (sidebar), core profile (≤ 15 user facts) in the prompt ·
+#79 memory design: auto facts with code limits, summaries every 6 turns, hybrid recall; D40–D45 ·
 #77 every eval is plan-only unless `--run` (owner: no paid runs until reviewed) ·
 #74 honesty section in `system.md`: no made-up answers, false premises corrected ·
 #72 #73 DeepEval benchmark (30 cases, targets) + DeepTeam red teaming, built not run (`evals/deepeval/`) ·
