@@ -26,15 +26,14 @@ import { streamChat } from './api'
 import { deleteChat, getChat, getInfo, listChats, renameChat } from './chatsApi'
 import { ChatView } from './components/ChatView'
 import { InfoPill } from './components/InfoPill'
-import { LeftPane, type LeftTab } from './components/LeftPane'
-import { MemoryPanel } from './components/MemoryPanel'
+import { MemoryPage } from './components/MemoryPage'
 import { MobileDrawer } from './components/MobileDrawer'
 import { Sidebar } from './components/Sidebar'
 import { SimbaAvatar } from './components/SimbaAvatar'
 import { TracePanel } from './components/TracePanel'
-import { addFact, deleteAllFacts, deleteFact, listFacts, updateFact } from './memoryApi'
+import { deleteFact, listFacts, updateFact } from './memoryApi'
 import { moodFor } from './mood'
-import type { Chat, Fact, FactKind, MemoryEvent, Message, Run, ServerInfo } from './types'
+import type { Chat, Fact, MemoryEvent, Message, Run, ServerInfo } from './types'
 
 export default function App() {
   const [chatId, setChatId] = useState<string | null>(null) // null = a new, unsaved chat
@@ -45,8 +44,8 @@ export default function App() {
   const [chatsError, setChatsError] = useState<string | null>(null) // last chatsApi failure, shown in a banner
   const [drawerOpen, setDrawerOpen] = useState(false) // mobile-only overlay showing the Sidebar
   const [info, setInfo] = useState<ServerInfo | null>(null) // model + search on/off for the header pill (#57)
-  const [leftTab, setLeftTab] = useState<LeftTab>('chats') // which left-pane tab is showing (#80)
-  const [facts, setFacts] = useState<Fact[]>([]) // the Memory tab's saved facts (#80)
+  const [view, setView] = useState<'chat' | 'memory'>('chat') // header tabs: the chat, or the Memory page (#87)
+  const [facts, setFacts] = useState<Fact[]>([]) // what the Memory page shows (#80, #87)
 
   // See the file header comment: these mirror state for async handlers to re-check after an await.
   const busyRef = useRef(false)
@@ -92,9 +91,8 @@ export default function App() {
   }, [])
 
   /**
-   * Memory tab (#80): reload the facts from the server. Called when the tab opens and after every
-   * change, so the list always shows what the server really stored (it trims and may reject text).
-   * A failure goes to the same banner as chat errors.
+   * Memory page (#80, #87): reload the facts from the server. Called when the page opens and after an
+   * Undo, so it always shows what the server really stored. A failure goes to the chat error banner.
    */
   async function refreshFacts() {
     try {
@@ -133,10 +131,16 @@ export default function App() {
     )
   }
 
-  /** Switch the left-pane tab; opening Memory loads the latest facts. */
-  function openTab(tab: LeftTab) {
-    setLeftTab(tab)
-    if (tab === 'memory') void refreshFacts()
+  /** Switch the header tab (#87); opening Memory loads the latest facts. */
+  function openView(next: 'chat' | 'memory') {
+    setView(next)
+    if (next === 'memory') void refreshFacts()
+  }
+
+  /** A "from chat" link on the Memory page: go back to the chat view and open that chat. */
+  function openChatFromMemory(id: string) {
+    setView('chat')
+    void selectChat(id)
   }
 
   // Load the server's setup once, for the header pill (#57). A failure is ignored on purpose: the
@@ -275,31 +279,20 @@ export default function App() {
     }
   }
 
-  // The left pane (#80): the chat list and the Memory tab. Rendered in the grid at md+ and inside the
-  // mobile drawer below that — one element, so both places show the same tab.
   const sidebar = (
-    <LeftPane
-      tab={leftTab}
-      onTab={openTab}
-      chats={
-        <Sidebar
-          chats={chats}
-          activeId={chatId}
-          onSelect={selectChat}
-          onNew={newChat}
-          onRename={renameChatById}
-          onDelete={deleteChatById}
-        />
-      }
-      memory={
-        <MemoryPanel
-          facts={facts}
-          onAdd={(kind: FactKind, text: string) => changeMemory(() => addFact(kind, text))}
-          onEdit={(id: number, text: string) => changeMemory(() => updateFact(id, text))}
-          onDelete={(id: number) => changeMemory(() => deleteFact(id))}
-          onDeleteAll={() => changeMemory(deleteAllFacts)}
-        />
-      }
+    <Sidebar
+      chats={chats}
+      activeId={chatId}
+      onSelect={(id) => {
+        setView('chat')
+        void selectChat(id)
+      }}
+      onNew={() => {
+        setView('chat')
+        newChat()
+      }}
+      onRename={renameChatById}
+      onDelete={deleteChatById}
     />
   )
 
@@ -321,6 +314,23 @@ export default function App() {
           <SimbaAvatar mood={mood} size={32} />
           <span className="font-serif text-xl font-semibold tracking-tight text-ink">Simba</span>
         </div>
+        {/* #87: Chat | Memory. The ARIA tab pattern, so a screen reader says "Memory, tab, 2 of 2". */}
+        <div role="tablist" aria-label="View" className="flex rounded-full border-[1.5px] border-ink bg-surface p-0.5 shadow-sm">
+          {(['chat', 'memory'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              role="tab"
+              aria-selected={view === v}
+              onClick={() => openView(v)}
+              className={`rounded-full px-3 py-1 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink ${
+                view === v ? 'bg-accent text-accent-ink' : 'text-ink hover:bg-raised'
+              }`}
+            >
+              {v === 'chat' ? 'Chat' : 'Memory'}
+            </button>
+          ))}
+        </div>
         <InfoPill info={info} />
         <div className="flex-1" />
         <button
@@ -331,7 +341,7 @@ export default function App() {
           Chats
         </button>
       </header>
-      <div className="grid min-h-0 grid-cols-1 md:grid-cols-[16rem_minmax(0,1fr)] lg:grid-cols-[16rem_minmax(0,1fr)_320px]">
+      <div className={`grid min-h-0 grid-cols-1 md:grid-cols-[16rem_minmax(0,1fr)] ${view === 'chat' ? 'lg:grid-cols-[16rem_minmax(0,1fr)_320px]' : ''}`}>
         <div className="hidden md:block">{sidebar}</div>
         {/* A flex column, not a grid: with a grid the banner and ChatView would each need a fixed
             row assignment, and a bare `<ChatView>` (no sibling) falls into row 1 by CSS Grid's
@@ -353,10 +363,15 @@ export default function App() {
             </div>
           )}
           <div className="min-h-0 flex-1">
-            <ChatView messages={messages} runs={runs} busy={busy} mood={mood} onSend={send} onUndoMemory={undoMemory} />
+            {view === 'chat' ? (
+              <ChatView messages={messages} runs={runs} busy={busy} mood={mood} onSend={send} onUndoMemory={undoMemory} />
+            ) : (
+              <MemoryPage facts={facts} chats={chats} onOpenChat={openChatFromMemory} />
+            )}
           </div>
         </div>
-        <TracePanel runs={runs} busy={busy} />
+        {/* The trace belongs to the chat; the Memory page takes its column too. */}
+        {view === 'chat' && <TracePanel runs={runs} busy={busy} />}
       </div>
       {/* Mobile drawer: the Sidebar as an overlay, closed by the backdrop, Escape, selecting a chat,
           or "+ New chat" (both inside selectChat/newChat). Only reachable below md; at md+ the

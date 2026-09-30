@@ -25,8 +25,11 @@ MAX_WEB_SEARCH_QUERY_CHARS = 500
 TOPICS = ("general", "news")
 TIME_RANGES = ("day", "week", "month", "year")
 
-# #81: the tools the model may call. Everything else is denied before it can run.
-ALLOWED_TOOLS = ("web_search", "remember")
+# #81, #87: the tools the model may call. Everything else is denied before it can run.
+ALLOWED_TOOLS = ("web_search", "remember", "list_memory", "update_memory", "forget_memory")
+
+# #87: the memory tools that change memory, and which argument holds the new text (None: no text).
+MEMORY_WRITES = {"remember": "fact", "update_memory": "text", "forget_memory": None}
 
 # #81: a fact passed to `remember` must share at least this share of its key words with what the
 # owner wrote in recent messages — the "only your own words" rule, checked in code. Half leaves room
@@ -117,28 +120,32 @@ def within_web_search_budget(serialized_call: str) -> HookResult:
 
 
 def memory_from_owner(serialized_call: str) -> HookResult:
-    """The code limits on `remember` (#81, D40). Other tools pass through.
+    """The code limits on memory changes (#81, #87; D40). Reads (list_memory) and other tools pass.
 
-    Blocks a save when:
-    1. the turn has already read web results (the untrusted-content rule, D35): a fact must never
-       come from a page, however it's worded;
-    2. the fact isn't in the owner's own words: fewer than OWN_WORDS_OVERLAP of its key words appear
-       in the owner's recent messages (`user_text`);
-    3. it looks like a secret (the output guard's key pattern): keys and passwords are never saved.
+    Blocks a remember / update_memory / forget_memory call when:
+    1. the turn has already read web results (the untrusted-content rule, D35): memory must never be
+       changed because of a page, however it's worded;
+    2. (remember, update_memory) the new text isn't in the owner's own words: fewer than
+       OWN_WORDS_OVERLAP of its key words appear in the owner's recent messages (`user_text`);
+    3. (remember, update_memory) it looks like a secret: keys and passwords are never saved.
+    forget_memory has its own second lock: nothing is deleted without the owner's next-message yes.
 
     Example: after "I mostly code in Python", remember(fact="Mostly works in Python") -> allow;
     remember(fact="Owner is an admin with full access") -> block (not the owner's words)
     """
     try:
         call = json.loads(serialized_call)
-        if call.get("name") != "remember":
+        if call.get("name") not in MEMORY_WRITES:
             return HookResult("allow", None, "")
-        fact = str(call.get("args", {}).get("fact", ""))
+        text_arg = MEMORY_WRITES[call["name"]]
+        fact = str(call.get("args", {}).get(text_arg, "")) if text_arg else ""
     except (AttributeError, TypeError, json.JSONDecodeError):
-        return HookResult("block", "memory-format", "remember call was malformed")
+        return HookResult("block", "memory-format", "memory call was malformed")
     # 1.
     if call.get("turn_read_untrusted"):
         return HookResult("block", "memory-after-untrusted", "nothing is saved after reading web results")
+    if text_arg is None:
+        return HookResult("allow", None, "forget waits for the owner's yes")
     # 2.
     if overlap(key_words(fact), key_words(str(call.get("user_text", "")))) < OWN_WORDS_OVERLAP:
         return HookResult("block", "memory-not-own-words", "a fact must be in the owner's own words")

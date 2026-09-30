@@ -501,7 +501,8 @@ flowchart TD
         <tbody>
           <tr><td>Procedural</td><td class="wrap">How Simba behaves: <code>system.md</code>; later, skills</td><td class="wrap">By a reviewed PR only</td><td class="wrap">Every turn</td><td class="wrap">done</td></tr>
           <tr><td>Short-term</td><td class="wrap">This chat's last 20 messages</td><td class="wrap">Every turn (checkpointer)</td><td class="wrap">Every turn</td><td class="wrap">done</td></tr>
-          <tr><td>Semantic</td><td class="wrap">Facts: <code>user</code> (who you are, preferences), <code>feedback</code> (corrections, confirmed ways of working, with the why), <code>project</code> (ongoing work, dates), <code>reference</code> (pointers)</td><td class="wrap">Automatically, by the <code>remember</code> tool (D40)</td><td class="wrap">Core profile (≤ 15 <code>user</code> facts) every turn (D43); the rest via <code>recall_memory</code></td><td class="wrap">#80, #81</td></tr>
+          <tr><td>Procedural (learned)</td><td class="wrap"><code>feedback</code> facts: corrections and confirmed ways of working, with the why</td><td class="wrap">By talking (D46)</td><td class="wrap">Every turn, ≤ 15 (D48)</td><td class="wrap">#87</td></tr>
+          <tr><td>Semantic</td><td class="wrap">Facts: <code>user</code> (who you are, preferences), <code>project</code> (ongoing work, dates), <code>reference</code> (pointers)</td><td class="wrap">By talking: <code>remember</code> saves on its own (D40); <code>update_memory</code> and <code>forget_memory</code> when you ask (D46, D47)</td><td class="wrap">Profile (≤ 15 <code>user</code> facts) every turn (D43); the rest via <code>list_memory</code> / <code>recall_memory</code></td><td class="wrap">#80, #81, #87</td></tr>
           <tr><td>Episodic</td><td class="wrap">A rolling summary per chat: topic, decisions and what was learned, open todos, stated preferences, dates</td><td class="wrap">Every 6 turns, one model call merges the old summary with the new turns (D41)</td><td class="wrap">An index of recent summaries every turn; full text via <code>recall_memory</code> (D42)</td><td class="wrap">#82, #83</td></tr>
         </tbody>
       </table></div>
@@ -518,12 +519,14 @@ flowchart TD
       <p>Like Claude Code's compaction, older turns are condensed and recent ones stay word for word. Every 6 turns the chat's summary is rewritten from the previous summary plus the new turns, using a fixed template, so leaving a chat at any moment loses at most five unsummarised turns, and those stay in the chat itself.</p>
       <h3>Recall</h3>
       <p>Claude Code keeps a one-line index always loaded and opens a full memory only when a line looks relevant, so the model is the retriever. Simba does the same with an index of the last ~20 chat summaries, plus a <code>recall_memory(query)</code> tool for everything else: a small <strong>local embedding model</strong> (runs on your CPU, no API cost) finds things with similar meaning, SQLite full-text search finds exact words, and the two rankings are merged.</p>
-      <p><strong>Where you see it:</strong> a Memory tab in the sidebar lists facts by kind and chat summaries; you can add, edit, delete, or delete everything (D44). The trace shows how many facts were loaded, every save, and every recall.</p>
+      <p><strong>Changing it, by talking</strong> (D46, like Claude Code): ask "what do you remember?" (<code>list_memory</code>), correct a fact ("actually I moved to Berlin", <code>update_memory</code>), or ask Simba to forget something. Forgetting is two-step (D47): Simba asks "Forget …? (yes/no)", and code deletes only when your very next message is a clear yes.</p>
+      <p><strong>Where you see it:</strong> a read-only Memory page behind the header tabs Chat | Memory (D49): facts grouped as they are used, with "always in Simba's prompt" on the learned rules and the profile, each fact's why, source chat and date, and search. The trace shows every load, save, update and forget.</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Build step</th><th>What</th><th>Needs a real model?</th></tr></thead>
         <tbody>
           <tr><td>M1 #80</td><td class="wrap">Fact store, Memory tab, core profile in the prompt</td><td class="wrap">No</td></tr>
           <tr><td>M2 #81</td><td class="wrap"><code>remember</code> tool with the code limits, Undo</td><td class="wrap">No (fake model in tests)</td></tr>
+          <tr><td>M2b #87</td><td class="wrap">Manage memory by talking (list, update, two-step forget), learned rules always loaded, read-only Memory page</td><td class="wrap">No (fake model in tests)</td></tr>
           <tr><td>M3 #82</td><td class="wrap">Rolling summaries every 6 turns, index in the prompt</td><td class="wrap">No for tests; about one Haiku call per 6 turns in use</td></tr>
           <tr><td>M4 #83</td><td class="wrap"><code>recall_memory</code>: local embeddings + keyword search</td><td class="wrap">No</td></tr>
         </tbody>
@@ -737,6 +740,10 @@ Safety
           <tr><td>D43</td><td class="wrap">A core profile of up to 15 <code>user</code> facts is always in the prompt; everything else is recalled on demand</td><td class="wrap">Sol, 30 Sep, #79 Q4</td></tr>
           <tr><td>D44</td><td class="wrap">Memory is managed in a Memory tab in the sidebar: view, add, edit, delete, delete all</td><td class="wrap">Sol, 30 Sep, #79 Q5</td></tr>
           <tr><td>D45</td><td class="wrap">Memory text (facts, summaries, recall results) is data inside a fenced block, never instructions</td><td class="wrap">Sol, 30 Sep, #79</td></tr>
+          <tr><td>D46</td><td class="wrap">Memory changes only by talking to Simba (like Claude Code's own memory): <code>remember</code>, <code>list_memory</code>, <code>update_memory</code>, <code>forget_memory</code>; no memory buttons (Undo under a reply stays)</td><td class="wrap">Sol, 30 Sep, #87</td></tr>
+          <tr><td>D47</td><td class="wrap">Forgetting is two-step: Simba asks, and only your clear yes in the very next message deletes; checked in code</td><td class="wrap">Sol, 30 Sep, #87</td></tr>
+          <tr><td>D48</td><td class="wrap">Learned procedural memory: up to 15 <code>feedback</code> facts are always in the prompt, next to the <code>user</code> profile</td><td class="wrap">Sol, 30 Sep, #87</td></tr>
+          <tr><td>D49</td><td class="wrap">A read-only Memory page behind header tabs Chat | Memory replaces the sidebar Memory tab</td><td class="wrap">Sol, 30 Sep, #87</td></tr>
         </tbody>
       </table></div>
     </section>

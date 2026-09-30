@@ -29,7 +29,8 @@ The browser reads them one at a time (frontend's streamChat, contracts.md § 11)
 exist, always in this order for one turn: `start` (once, first) -> any number of `trace` -> any
 number of `token` -> `done` (once, last) — or `error` instead of `done` if the graph raised. A sixth,
 `replace`, comes just before `done` when the output guard retracts an answer (#15). A seventh,
-`memory`, reports each fact the `remember` tool saved (#81), so the page can offer Undo. Agent text is
+`memory`, reports each fact the memory tools saved, updated or forgot (#81, #87), so the page can
+show it (with Undo for saves and updates). Agent text is
 held until the output guard passes, so unsafe answer text is never sent to the browser.
 """
 
@@ -58,7 +59,7 @@ from simba.harness.classifier import InjectionClassifier, load_classifier
 from simba.harness.output_guard import RETRACT_TEXT
 from simba.harness.settings import CHAT_BUDGET_USD
 from simba.model import cost_usd, make_model, model_name
-from simba.tools.remember import make_remember_tool
+from simba.tools.memory_tools import make_memory_tools
 from simba.tools.web_search import make_web_search_tool
 
 # backend/.env holds SIMBA_FAKE_LLM / ANTHROPIC_API_KEY (git-ignored: the repo is public).
@@ -148,7 +149,7 @@ def create_app(
                 graph_options = {"web_search_tool": resolved_web_search_tool} if resolved_web_search_tool else {}
                 app.state.graph = build_graph(chat_model, checkpointer, resolved_classifier,
                                               load_profile=memory.core_profile,
-                                              remember_tool=make_remember_tool(memory), **graph_options)
+                                              memory_tools=make_memory_tools(memory), **graph_options)
                 yield
             finally:
                 await chats.close()

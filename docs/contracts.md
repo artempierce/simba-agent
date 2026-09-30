@@ -283,7 +283,7 @@ classifier as above, and stores `app.state.graph`, `app.state.checkpointer` (and
 | `trace` | § 6 event | each node |
 | `token` | `{"text": str}` | answer chunks, sent only after the full reply passes `after_model` |
 | `error` | `{"message": str}` | an exception; then the stream ends |
-| `memory` | `{"action": "added"\|"updated", "fact_id", "kind", "text", "previous_text"}` | #81: the `remember` tool saved a fact; sent when it happens (not a trace line). Undo = DELETE an added fact, PATCH back `previous_text` for an updated one |
+| `memory` | `{"action": "added"\|"updated"\|"forgotten", "fact_id", "kind", "text", "previous_text"}` | #81: the `remember` tool saved a fact; sent when it happens (not a trace line). Undo = DELETE an added fact, PATCH back `previous_text` for an updated one |
 | `replace` | `{"text": str}` | #15: `after_model` retracted the buffered answer; no unsafe answer chunks were sent. The page swaps the empty reply bubble for `text` just before `done` |
 | `done` | `{"input_tokens", "output_tokens", "cost_usd", "ms"}` | last; totals summed from trace events |
 
@@ -359,26 +359,37 @@ TEXT, created_at TEXT, updated_at TEXT)`. `KINDS = ("user", "feedback", "project
 
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| GET | `/api/memory/facts` | – | `[fact]` |
-| POST | `/api/memory/facts` | `{"kind", "text", "why"?}` | `fact` (201); 409 when full; 422 bad kind or text |
-| PATCH | `/api/memory/facts/{id}` | any of `kind`, `text`, `why` | `fact`; 404 unknown id |
-| DELETE | `/api/memory/facts/{id}` | – | 204; 404 unknown id |
-| DELETE | `/api/memory` | – | `{"deleted": n}` |
+| GET | `/api/memory/facts` | – | `[fact]` (the Memory page) |
+| PATCH | `/api/memory/facts/{id}` | any of `kind`, `text`, `why` | `fact` (Undo of an update); 404 unknown id |
+| DELETE | `/api/memory/facts/{id}` | – | 204 (Undo of a save); 404 unknown id |
+
+No add or delete-all route (#87, D46): memory is changed by talking, through the memory tools.
+`core_profile() -> {"user": [...], "feedback": [...]}` (≤ `CORE_PROFILE_LIMIT` each, `ALWAYS_LOADED`);
+the agent's `profile_block(profile)` renders one `<memory>` block with a heading per kind.
+`memory_pending(chat_id PK, target TEXT json ids | "all", human_turn INTEGER)`: `set_pending`,
+`get_pending`, `clear_pending`; `delete_facts(ids) -> [deleted facts]`; `is_clear_yes(text)`.
 
 Guards: `<memory>` is an internal tag — `fake-tags` blocks it in input, `no_internal_tags` in output.
 
-**`remember` tool (#81, `simba/tools/remember.py`)** — `make_remember_tool(store)`; args `kind`, `fact`,
+**Memory tools (#81, #87, `simba/tools/memory_tools.py`)** — `make_memory_tools(store) -> [remember, list_memory,
+update_memory, forget_memory]`. `list_memory(kind?)` returns `<memory>` lines `[id] kind: text (why: …)`.
+`update_memory(fact_id, text, why?)` rewrites one fact (SSE `memory` `updated` with `previous_text`).
+`forget_memory(fact_ids? | everything)` (+ injected state): deletes only if this chat's pending request has
+the same target, was parked on the previous owner message (`human_turn - 1`) and the newest owner message
+`is_clear_yes`; otherwise it parks the request and tells the agent to ask (SSE `memory` `forgotten` per
+deleted fact). `remember`: args `kind`, `fact`,
 `why?` (+ injected run config: `thread_id` becomes `source_chat_id`). Calls `MemoryStore.remember(kind,
 text, why, source_chat_id) -> (fact, "added" | "updated", previous_text)`: a same-kind fact whose
 `key_words` overlap ≥ `DUPLICATE_OVERLAP` (0.6) is updated instead of adding a copy. Emits trace
 `remember`, `ok`, `'{action} · {kind} · "{text}"'` (or `error`, `not saved · …`) and a custom chunk
 `{"memory_event": {...}}` that api.py sends as the SSE `memory` event. Returns `"Saved ({action}): {text}"`.
-`build_graph(..., remember_tool=...)` adds it to the tool loop; the agent offers it even after the
+`build_graph(..., memory_tools=[...])` adds them to the tool loop; the agent offers it even after the
 search budget is spent. `before_tool` payload adds `turn_read_untrusted` (a web_search result after the
 newest human message) and `user_text` (the last `USER_TEXT_MESSAGES` = 6 human messages); only
 web_search calls count toward `web_search_calls`. Hook `memory_from_owner` blocks: after untrusted
 content (`memory-after-untrusted`), key-word overlap with `user_text` < `OWN_WORDS_OVERLAP` 0.5
-(`memory-not-own-words`), key-shaped text (`memory-secret`). `ALLOWED_TOOLS = ("web_search", "remember")`.
+(`memory-not-own-words`), key-shaped text (`memory-secret`). `ALLOWED_TOOLS = ("web_search", "remember", "list_memory", "update_memory", "forget_memory")`; `memory_from_owner`
+applies own-words and secrets to remember/update_memory (`MEMORY_WRITES`), and the untrusted-content block to all three writes.
 
 ## § 11 Frontend
 

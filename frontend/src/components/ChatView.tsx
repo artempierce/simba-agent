@@ -223,6 +223,14 @@ function Bubble({
  * offers an action that no longer applies.
  */
 function MemoryNote({ fact, onUndo }: { fact: RememberedFact; onUndo: () => void }) {
+  // A forgotten fact is gone after your own "yes": nothing to undo, just say it happened (#87).
+  if (fact.action === 'forgotten') {
+    return (
+      <p className="mt-1 text-xs text-muted">
+        <span aria-hidden="true">✦ </span>Forgot: “{fact.text}”
+      </p>
+    )
+  }
   const label = fact.action === 'added' ? 'Remembered' : 'Updated memory'
   return (
     <p className="mt-1 flex flex-wrap items-baseline gap-x-1.5 text-xs text-muted">

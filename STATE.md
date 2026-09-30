@@ -14,10 +14,11 @@ normalisation, #64 safety-eval follow-ups. Phase 2: #65 tool manifests, #66 appr
 
 ## Next up (post-MVP)
 - #30 Self-improvement (propose → approve → install), after the tool and approval design is ready
-- Memory: #80 M1 fact store + Memory tab · #81 M2 remember tool · #82 M3 rolling summaries · #83 M4 recall
+- Memory: #82 M3 rolling summaries · #83 M4 recall (M1 #80, M2 #81, M2b #87 done)
 - #39 subagents (needs owner answers)
 
 ## Recently done
+#87 memory by talking (list / update / two-step forget), feedback rules always loaded, read-only Memory page; D46–D49 ·
 #55 search prompt: "When to search" principles (merged without an eval run; owner tests by hand) ·
 #81 memory M2: `remember` tool saves facts itself (own words only, never after web results, no secrets, dedupe) + Undo ·
 #80 memory M1: fact store, Memory tab (sidebar), core profile (≤ 15 user facts) in the prompt ·
@@ -56,7 +57,7 @@ redesign) · #9 real Claude + token counts in trace · #15 output guard
 | Model, cost, tokens | `model.py`; per-chat budget in `harness/settings.py` + `api.py` step 2b |
 | HTTP API / SSE | `api.py`, `chats_api.py`, `specs/api-spec.json` (checked by `tests/test_api_spec.py`) |
 | Chat storage | `chats.py` (SQLite in `data/`) |
-| Memory | `memory.py` (facts), `memory_api.py`, `tools/remember.py`, hook `memory_from_owner`, `nodes/agent.py` `profile_block`; frontend `MemoryPanel.tsx`, `LeftPane.tsx` |
+| Memory | `memory.py` (facts, pending forget), `memory_api.py` (read + Undo), `tools/memory_tools.py`, hook `memory_from_owner`, `nodes/agent.py` `profile_block`; frontend `MemoryPage.tsx` |
 | Frontend | `App.tsx` (state), `api.ts` (SSE parser), `components/TracePanel.tsx`, `ChatView.tsx`; style in `docs/visual-style.md` |
 | Benchmark + red team | `evals/deepeval/` (separate uv project, HTTP black-box), `evals/benchmark_cases.yaml`, `targets.yaml` |
 | Evals (search, safety) | `evals/*_cases.yaml` (cases + rubrics), `backend/evals/` (runners, graders); results in the main checkout's `.claude/hillclimb/`; README → Evals |
