@@ -123,8 +123,8 @@ async def rename_chat(chat_id: str, body: RenameChatBody, request: Request) -> d
 
 @router.delete("/{chat_id}", status_code=204)
 async def delete_chat(chat_id: str, request: Request) -> None:
-    """DELETE /api/chats/{id} -> remove the chat and its runs, and erase its checkpointed graph state
-    (adelete_thread) so nothing of a deleted chat is left in either store.
+    """DELETE /api/chats/{id} -> remove the chat and its runs, erase its checkpointed graph state
+    (adelete_thread), and forget its summary (#82), so nothing of a deleted chat is left anywhere.
 
     Checkpointer first, then the ChatStore row: if adelete_thread fails, the chat stays listed, so
     delete can be retried, instead of a checkpoint orphaned behind an already-gone chat.
@@ -134,3 +134,7 @@ async def delete_chat(chat_id: str, request: Request) -> None:
     await _get_or_404(request, chat_id)
     await request.app.state.checkpointer.adelete_thread(chat_id)
     await request.app.state.chats.delete(chat_id)
+    # #82: the chat's summary goes too — memory of a deleted chat shouldn't outlive it.
+    memory = getattr(request.app.state, "memory", None)
+    if memory is not None:
+        await memory.delete_summary(chat_id)

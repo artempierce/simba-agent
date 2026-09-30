@@ -55,7 +55,11 @@ def today_text() -> str:
 
 
 # The heading each always-loaded kind gets inside the <memory> block (D43, D48).
-PROFILE_HEADINGS = {"user": "About the user", "feedback": "How the user wants you to work"}
+PROFILE_HEADINGS = {
+    "user": "About the user",
+    "feedback": "How the user wants you to work",
+    "recent_chats": "Recent chats with the user (date · title — topic)",  # #82, episodic index
+}
 
 
 def profile_block(profile: dict[str, list[str]]) -> str:

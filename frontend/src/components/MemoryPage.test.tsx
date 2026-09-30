@@ -17,7 +17,7 @@ const chats: Chat[] = [{ id: 'c1', title: 'Memory plan', created_at: '', updated
 describe('MemoryPage', () => {
   /** Learned rules and the profile are marked "always in Simba's prompt"; projects are not. */
   it('groups facts and marks what is always in the prompt', () => {
-    render(<MemoryPage facts={[fact(1, 'feedback', 'Prefers short answers', { why: 'said so' }), fact(2, 'project', 'Building Simba')]} chats={chats} onOpenChat={vi.fn()} />)
+    render(<MemoryPage summaries={[]} facts={[fact(1, 'feedback', 'Prefers short answers', { why: 'said so' }), fact(2, 'project', 'Building Simba')]} chats={chats} onOpenChat={vi.fn()} />)
     const rules = screen.getByRole('region', { name: 'How you want me to work' })
     expect(rules.textContent).toContain('Prefers short answers')
     expect(rules.textContent).toContain('Why: said so')
@@ -27,7 +27,7 @@ describe('MemoryPage', () => {
 
   /** Search keeps facts containing every typed word, in any order and case. */
   it('filters by search words', () => {
-    render(<MemoryPage facts={[fact(1, 'user', 'Mostly works in Python'), fact(2, 'user', 'Has a cat')]} chats={chats} onOpenChat={vi.fn()} />)
+    render(<MemoryPage summaries={[]} facts={[fact(1, 'user', 'Mostly works in Python'), fact(2, 'user', 'Has a cat')]} chats={chats} onOpenChat={vi.fn()} />)
     fireEvent.change(screen.getByLabelText('Search memory'), { target: { value: 'python WORKS' } })
     const about = screen.getByRole('region', { name: 'About you' }).textContent
     expect(about).toContain('Mostly works in Python')
@@ -37,9 +37,22 @@ describe('MemoryPage', () => {
   /** The source chat is a link back to it; the page has no add, edit or delete buttons. */
   it('links to the source chat and offers no editing', () => {
     const onOpenChat = vi.fn()
-    render(<MemoryPage facts={[fact(1, 'user', 'Name: Sol', { source_chat_id: 'c1' })]} chats={chats} onOpenChat={onOpenChat} />)
+    render(<MemoryPage summaries={[]} facts={[fact(1, 'user', 'Name: Sol', { source_chat_id: 'c1' })]} chats={chats} onOpenChat={onOpenChat} />)
     fireEvent.click(screen.getByRole('button', { name: 'from “Memory plan”' }))
     expect(onOpenChat).toHaveBeenCalledWith('c1')
     expect(screen.queryByRole('button', { name: /edit|delete|add|save/i })).toBeNull()
+  })
+
+  /** #82: Past chats shows each summary line by line, with a link to its chat. */
+  it('lists chat summaries with a link to the chat', () => {
+    const onOpenChat = vi.fn()
+    const summary = { chat_id: 'c1', title: 'Memory plan', summary: 'Topic: Simba memory\nOpen: build M4', topic: 'Simba memory', turns: 6, updated_at: '2026-09-30T10:00:00Z' }
+    render(<MemoryPage facts={[]} summaries={[summary]} chats={chats} onOpenChat={onOpenChat} />)
+    const past = screen.getByRole('region', { name: 'Past chats' })
+    expect(past.textContent).toContain('Topic: Simba memory')
+    expect(past.textContent).toContain('Open: build M4')
+    expect(past.textContent).toContain('covers 6 messages')
+    fireEvent.click(screen.getByRole('button', { name: 'Memory plan' }))
+    expect(onOpenChat).toHaveBeenCalledWith('c1')
   })
 })

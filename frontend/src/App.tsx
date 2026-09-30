@@ -31,9 +31,9 @@ import { MobileDrawer } from './components/MobileDrawer'
 import { Sidebar } from './components/Sidebar'
 import { SimbaAvatar } from './components/SimbaAvatar'
 import { TracePanel } from './components/TracePanel'
-import { deleteFact, listFacts, updateFact } from './memoryApi'
+import { deleteFact, listFacts, listSummaries, updateFact } from './memoryApi'
 import { moodFor } from './mood'
-import type { Chat, Fact, MemoryEvent, Message, Run, ServerInfo } from './types'
+import type { Chat, ChatSummary, Fact, MemoryEvent, Message, Run, ServerInfo } from './types'
 
 export default function App() {
   const [chatId, setChatId] = useState<string | null>(null) // null = a new, unsaved chat
@@ -46,6 +46,7 @@ export default function App() {
   const [info, setInfo] = useState<ServerInfo | null>(null) // model + search on/off for the header pill (#57)
   const [view, setView] = useState<'chat' | 'memory'>('chat') // header tabs: the chat, or the Memory page (#87)
   const [facts, setFacts] = useState<Fact[]>([]) // what the Memory page shows (#80, #87)
+  const [summaries, setSummaries] = useState<ChatSummary[]>([]) // the Memory page's Past chats (#82)
 
   // See the file header comment: these mirror state for async handlers to re-check after an await.
   const busyRef = useRef(false)
@@ -96,7 +97,9 @@ export default function App() {
    */
   async function refreshFacts() {
     try {
-      setFacts(await listFacts())
+      const [freshFacts, freshSummaries] = await Promise.all([listFacts(), listSummaries()])
+      setFacts(freshFacts)
+      setSummaries(freshSummaries)
     } catch (e) {
       reportChatsError(e)
     }
@@ -366,7 +369,7 @@ export default function App() {
             {view === 'chat' ? (
               <ChatView messages={messages} runs={runs} busy={busy} mood={mood} onSend={send} onUndoMemory={undoMemory} />
             ) : (
-              <MemoryPage facts={facts} chats={chats} onOpenChat={openChatFromMemory} />
+              <MemoryPage facts={facts} summaries={summaries} chats={chats} onOpenChat={openChatFromMemory} />
             )}
           </div>
         </div>

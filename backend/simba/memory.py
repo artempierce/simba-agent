@@ -10,6 +10,9 @@ Key ideas:
 - A fact has a kind, the same four Claude Code uses for its own memory (see KINDS). `user` facts
   (the profile, D43) and `feedback` facts (learned "how to work with me" rules — procedural memory,
   D48) go into every prompt; `project` and `reference` facts are looked up when needed.
+- Episodic memory (#82, D41): each chat keeps one rolling summary (`chat_summaries`), rewritten every
+  SUMMARY_EVERY owner turns by the summarize node. The prompt gets a one-line index of the most
+  recent ones (RECENT_CHATS_IN_PROMPT); the full text is read on demand (M4's recall).
 - Memory changes only by talking to Simba (#87, D46): its tools call this store. Forgetting is
   two-step (D47): a request is parked as "pending" for the chat, and only the owner's clear "yes" in
   the very next message lets it through (`is_clear_yes`, the forget tool).
@@ -42,6 +45,14 @@ MAX_FACTS = 200
 # facts and the newest 15 `feedback` facts. ~30 short lines is a few hundred tokens — cheap on every
 # turn, and it's what almost every answer can use.
 CORE_PROFILE_LIMIT = 15
+
+# #82: how many recent chat summaries the prompt lists, one line each (date · title · topic). Enough to
+# spot "we talked about that last week"; the full summary is looked up when needed (M4).
+RECENT_CHATS_IN_PROMPT = 20
+
+# #82: a chat's summary is rewritten after this many new owner turns (D41). Six is often enough that
+# leaving a chat never loses much, rarely enough that summaries cost about one small call per 6 turns.
+SUMMARY_EVERY = 6
 
 # The kinds that are always in the prompt, in the order the prompt shows them.
 ALWAYS_LOADED = ("user", "feedback")
@@ -117,6 +128,14 @@ class MemoryStore:
             """CREATE TABLE IF NOT EXISTS memory_facts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, text TEXT NOT NULL,
                 why TEXT, source_chat_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+            )"""
+        )
+        # #82: one rolling summary per chat. `topic` is the summary's first line, kept apart for the
+        # prompt's index; `turns` is how many owner turns the summary covers.
+        await db.execute(
+            """CREATE TABLE IF NOT EXISTS chat_summaries (
+                chat_id TEXT PRIMARY KEY, summary TEXT NOT NULL, topic TEXT NOT NULL,
+                turns INTEGER NOT NULL, updated_at TEXT NOT NULL
             )"""
         )
         # #87: at most one forget request waiting for a "yes", per chat. `target` is a JSON list of
@@ -214,9 +233,11 @@ class MemoryStore:
         return cursor.rowcount
 
     async def core_profile(self) -> dict[str, list[str]]:
-        """What every prompt includes: the newest CORE_PROFILE_LIMIT facts of each ALWAYS_LOADED kind.
+        """What every prompt includes: the newest CORE_PROFILE_LIMIT facts of each ALWAYS_LOADED kind,
+        plus (#82) the index of recent chats, one line each.
 
-        Example: {"user": ["Name: Sol"], "feedback": ["Prefers short answers"]}
+        Example: {"user": ["Name: Sol"], "feedback": ["Prefers short answers"],
+                  "recent_chats": ["30 Sep · Memory plan — designing Simba's memory"]}
         """
         profile: dict[str, list[str]] = {}
         for kind in ALWAYS_LOADED:
@@ -225,7 +246,60 @@ class MemoryStore:
                 (kind, CORE_PROFILE_LIMIT),
             )
             profile[kind] = [text for (text,) in await cursor.fetchall()]
+        profile["recent_chats"] = [
+            f"{_day(s['updated_at'])} · {s['title']} — {s['topic']}"
+            for s in await self.list_summaries(RECENT_CHATS_IN_PROMPT)
+        ]
         return profile
+
+    async def get_summary(self, chat_id: str) -> dict | None:
+        """One chat's summary as {"chat_id", "summary", "topic", "turns", "updated_at"}, or None."""
+        cursor = await self._db.execute(
+            "SELECT chat_id, summary, topic, turns, updated_at FROM chat_summaries WHERE chat_id = ?", (chat_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(zip(("chat_id", "summary", "topic", "turns", "updated_at"), row)) if row else None
+
+    async def save_summary(self, chat_id: str, summary: str, turns: int) -> dict:
+        """Store (or replace) a chat's rolling summary; its first line becomes the topic for the index."""
+        summary = summary.strip()
+        topic = summary.splitlines()[0].removeprefix("Topic:").strip()[:MAX_FACT_CHARS] if summary else ""
+        await self._db.execute(
+            "INSERT OR REPLACE INTO chat_summaries (chat_id, summary, topic, turns, updated_at) VALUES (?, ?, ?, ?, ?)",
+            (chat_id, summary, topic, turns, _now()),
+        )
+        await self._db.commit()
+        return await self.get_summary(chat_id)
+
+    async def list_summaries(self, limit: int | None = None) -> list[dict]:
+        """Chat summaries, newest first, each with its chat's title.
+
+        The titles live in chats.py's `chats` table, in the same database file, so one SQL join
+        reads both — a summary whose chat is gone is left out (delete_summary normally removes it).
+        A store opened on a file without that table (a unit test of this store alone) uses the chat
+        id as the title instead of failing.
+        """
+        keys = ("chat_id", "title", "summary", "topic", "turns", "updated_at")
+        limit_value = limit if limit is not None else -1  # SQLite: LIMIT -1 means no limit
+        try:
+            cursor = await self._db.execute(
+                """SELECT s.chat_id, c.title, s.summary, s.topic, s.turns, s.updated_at
+                   FROM chat_summaries s JOIN chats c ON c.id = s.chat_id
+                   ORDER BY s.updated_at DESC LIMIT ?""",
+                (limit_value,),
+            )
+        except aiosqlite.OperationalError:  # no `chats` table in this file
+            cursor = await self._db.execute(
+                """SELECT chat_id, chat_id, summary, topic, turns, updated_at FROM chat_summaries
+                   ORDER BY updated_at DESC LIMIT ?""",
+                (limit_value,),
+            )
+        return [dict(zip(keys, row)) for row in await cursor.fetchall()]
+
+    async def delete_summary(self, chat_id: str) -> None:
+        """Forget a chat's summary (called when the chat itself is deleted)."""
+        await self._db.execute("DELETE FROM chat_summaries WHERE chat_id = ?", (chat_id,))
+        await self._db.commit()
 
     async def delete_facts(self, fact_ids: list[int]) -> list[dict]:
         """Delete these facts; returns the ones that existed (so the caller can say what was forgotten)."""
@@ -257,6 +331,15 @@ class MemoryStore:
     async def close(self) -> None:
         """Close the database connection (api.py's lifespan calls this on shutdown)."""
         await self._db.close()
+
+
+def _day(iso: str) -> str:
+    """"2026-09-30T14:03:11+00:00" -> "30 Sep" (short dates for the prompt's chat index)."""
+    try:
+        d = datetime.fromisoformat(iso)
+    except ValueError:
+        return iso[:10]
+    return f"{d.day} {d:%b}"  # not strftime("%-d"): that doesn't exist on Windows
 
 
 def is_clear_yes(text: str) -> bool:

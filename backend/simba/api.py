@@ -59,6 +59,7 @@ from simba.harness.classifier import InjectionClassifier, load_classifier
 from simba.harness.output_guard import RETRACT_TEXT
 from simba.harness.settings import CHAT_BUDGET_USD
 from simba.model import cost_usd, make_model, model_name
+from simba.nodes.summarize import make_summarize_node
 from simba.tools.memory_tools import make_memory_tools
 from simba.tools.web_search import make_web_search_tool
 
@@ -149,7 +150,8 @@ def create_app(
                 graph_options = {"web_search_tool": resolved_web_search_tool} if resolved_web_search_tool else {}
                 app.state.graph = build_graph(chat_model, checkpointer, resolved_classifier,
                                               load_profile=memory.core_profile,
-                                              memory_tools=make_memory_tools(memory), **graph_options)
+                                              memory_tools=make_memory_tools(memory),
+                                              summarize=make_summarize_node(chat_model, memory), **graph_options)
                 yield
             finally:
                 await chats.close()

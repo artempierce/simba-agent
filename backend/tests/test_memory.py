@@ -62,7 +62,7 @@ async def test_core_profile_is_the_newest_user_and_feedback_facts(tmp_path):
     for i in range(CORE_PROFILE_LIMIT + 2):
         await store.add_fact("user", f"user fact {i}")
     profile = await store.core_profile()
-    assert set(profile) == {"user", "feedback"}
+    assert set(profile) == {"user", "feedback", "recent_chats"} and profile["recent_chats"] == []
     assert len(profile["user"]) == CORE_PROFILE_LIMIT and profile["user"][0] == f"user fact {CORE_PROFILE_LIMIT + 1}"
     assert profile["feedback"] == ["Prefers short answers"]
     await store.close()

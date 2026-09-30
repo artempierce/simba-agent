@@ -6,7 +6,7 @@
  * Same shape as chatsApi.ts: callers get typed data or a thrown `Error` with the server's own
  * message, never a raw `Response`.
  */
-import type { Fact } from './types'
+import type { ChatSummary, Fact } from './types'
 
 /** All memory routes share this prefix. */
 const BASE = '/api/memory'
@@ -36,6 +36,9 @@ async function send<T>(path: string, method: string, body?: unknown): Promise<T>
 
 /** Every saved fact, newest change first (GET /api/memory/facts). */
 export const listFacts = () => send<Fact[]>('/facts', 'GET')
+
+/** Every chat summary with its chat's title, newest first (GET /api/memory/summaries, #82). */
+export const listSummaries = () => send<ChatSummary[]>('/summaries', 'GET')
 
 /** Put back a fact's text (PATCH /api/memory/facts/{id}) — Undo of an update. */
 export const updateFact = (id: number, text: string) => send<Fact>(`/facts/${id}`, 'PATCH', { text })

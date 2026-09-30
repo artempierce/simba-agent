@@ -87,6 +87,7 @@ def build_graph(
     web_search_tool: BaseTool | None = None,
     load_profile: Callable[[], Awaitable[dict[str, list[str]]]] | None = None,
     memory_tools: list[BaseTool] | None = None,
+    summarize: Callable | None = None,
 ) -> CompiledStateGraph:
     """Build and compile Simba's graph.
 
@@ -105,6 +106,8 @@ def build_graph(
         memory_tools: remember, list_memory, update_memory, forget_memory (#81, #87,
             tools/memory_tools.py); they join web_search in the same tool loop and pass the same
             before_tool checks. None means no memory tools.
+        summarize: the summarize node (#82, nodes/summarize.py) that keeps each chat's rolling
+            summary; it runs after after_model. None (tests, no memory) ends the turn at after_model.
 
     Returns: a compiled graph, ready for `.astream(...)` / `.ainvoke(...)`.
 
@@ -143,6 +146,12 @@ def build_graph(
         # 6. The tool's result goes back to the agent.
         graph.add_edge("tools", "agent")
     # 7. Both terminal paths end the turn.
-    graph.add_edge("after_model", END)
+    if summarize is not None:
+        # 7b. #82: every answered turn passes the summarize node, which only works every 6th turn.
+        graph.add_node("summarize", summarize)
+        graph.add_edge("after_model", "summarize")
+        graph.add_edge("summarize", END)
+    else:
+        graph.add_edge("after_model", END)
     graph.add_edge("refuse", END)
     return graph.compile(checkpointer=checkpointer)

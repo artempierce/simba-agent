@@ -61,5 +61,15 @@ export type MemoryEvent = {
 /** A saved fact as the reply shows it; `undone` once you clicked Undo. */
 export type RememberedFact = MemoryEvent & { undone?: boolean }
 
+/** A chat's rolling summary (#82): what later chats remember of it. */
+export type ChatSummary = {
+  chat_id: string
+  title: string
+  summary: string // "Topic: …\nDecided / learned: …" — one line per heading
+  topic: string
+  turns: number // how many of your messages it covers
+  updated_at: string
+}
+
 /** One chat in the sidebar (step 6). Times are ISO 8601 UTC strings. */
 export type Chat = { id: string; title: string; created_at: string; updated_at: string }

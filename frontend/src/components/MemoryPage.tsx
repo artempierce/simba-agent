@@ -10,10 +10,11 @@
  * every turn (memory.ALWAYS_LOADED, ≤ 15 each). The rest is looked up when a chat needs it.
  */
 import { useState } from 'react'
-import type { Chat, Fact, FactKind } from '../types'
+import type { Chat, ChatSummary, Fact, FactKind } from '../types'
 
 type Props = {
   facts: Fact[] // every saved fact, newest change first
+  summaries: ChatSummary[] // #82: every chat's rolling summary, newest first
   chats: Chat[] // to show which chat a fact came from, by title
   onOpenChat: (id: string) => void // a "from chat" link was clicked
 }
@@ -42,14 +43,17 @@ function shortDate(iso: string): string {
  * 2. Each section lists its facts; an always-loaded section marks the ones beyond the first 15 as
  *    "not in the prompt right now", so the label never overstates what Simba sees.
  * 3. Each fact shows its reason, the chat it came from (a link that opens it) and when it last changed.
+ * 4. Past chats (#82): each chat's rolling summary, one heading per line, with a link to the chat.
+ *    The search filters these too.
  */
-export function MemoryPage({ facts, chats, onOpenChat }: Props) {
+export function MemoryPage({ facts, summaries, chats, onOpenChat }: Props) {
   const [query, setQuery] = useState('')
   const titles = new Map(chats.map((c) => [c.id, c.title]))
 
   // 1.
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   const shown = facts.filter((f) => words.every((w) => `${f.text} ${f.why ?? ''}`.toLowerCase().includes(w)))
+  const shownSummaries = summaries.filter((s) => words.every((w) => `${s.title} ${s.summary}`.toLowerCase().includes(w)))
 
   return (
     <main className="h-full overflow-y-auto bg-surface">
@@ -114,9 +118,37 @@ export function MemoryPage({ facts, chats, onOpenChat }: Props) {
           )
         })}
 
-        <section aria-label="Past chats" className="flex flex-col gap-1">
-          <h2 className="text-sm font-semibold tracking-wide text-ink uppercase">Past chats</h2>
-          <p className="text-sm text-muted">Chat summaries arrive with the next memory step (M3).</p>
+        {/* 4. */}
+        <section aria-label="Past chats" className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <h2 className="text-sm font-semibold tracking-wide text-ink uppercase">Past chats</h2>
+            <span className="text-xs text-muted">({summaries.length})</span>
+            <span className="rounded-full bg-mint px-2 text-xs text-ink">recent ones listed in Simba's prompt</span>
+          </div>
+          <p className="text-xs text-muted">A running summary per chat, updated every 6 of your messages</p>
+          {shownSummaries.length === 0 ? (
+            <p className="text-sm text-muted">{words.length ? 'Nothing matches.' : 'No summaries yet — a chat gets one after 6 messages.'}</p>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {shownSummaries.map((s) => (
+                <li key={s.chat_id} className="rounded-xl border border-rule bg-bg px-4 py-3">
+                  <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
+                    <button type="button" onClick={() => onOpenChat(s.chat_id)} className="font-semibold text-ink underline decoration-dotted">
+                      {s.title}
+                    </button>
+                    <span className="text-xs text-muted">
+                      {shortDate(s.updated_at)} · covers {s.turns} messages
+                    </span>
+                  </p>
+                  <div className="mt-1 flex flex-col gap-0.5 text-sm text-ink">
+                    {s.summary.split('\n').map((line, i) => (
+                      <p key={i}>{line}</p>
+                    ))}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <p className="border-t border-rule pt-4 text-sm text-muted">
