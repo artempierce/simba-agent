@@ -22,8 +22,9 @@ is the second, model-based layer.
 Ported from art-lab's guards/input.py (`/Users/sol/art-lab/backend/artlab/guards/input.py`), dropping
 the session-budget check — Simba has no per-chat budget yet — and widening `fake-tags` to also catch
 Simba's own `<user_message>` delimiter tag (see that rule's comment below). `find_injection` also
-normalizes the text first (see `_normalize_for_matching`) so zero-width and fullwidth look-alike
-characters can't be used to sneak an attack past every rule at once.
+normalizes the text first (see `_normalize_for_matching`) so spelling tricks — zero-width and
+fullwidth characters, Cyrillic or Greek look-alike letters, accents, s p a c e d letters, a line
+break, and (as a second pass) leetspeak — can't sneak an attack past every rule at once (#63).
 
 Design choice: each hook returns a `HookResult` (harness/hooks.py) instead of raising. A hook only
 *decides*; the hook runner decides what to *do* about it (write a trace line, stop at a block). That
@@ -129,8 +130,39 @@ INJECTION_RULES: dict[str, re.Pattern[str]] = {
 }
 
 
+# Latin letters that Cyrillic and Greek letters imitate (#63). A word like "ignоre" with a Cyrillic
+# "о" looks identical to "ignore" but is a different character, so `\bignore\b` wouldn't match it.
+# Only letters that really look like the Latin one are listed. Folding happens for *matching* only:
+# a Russian or Greek message is never changed, and English rules can't match Russian words anyway.
+HOMOGLYPHS = str.maketrans({
+    # Cyrillic lower / upper case
+    "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i", "ј": "j", "ѕ": "s",
+    "ԁ": "d", "ӏ": "l", "һ": "h", "ԛ": "q", "ԝ": "w",
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T",
+    "Х": "X", "У": "Y", "І": "I", "Ј": "J", "Ѕ": "S",
+    # Greek lower / upper case
+    "ο": "o", "α": "a", "ι": "i", "κ": "k", "ν": "v", "ρ": "p", "υ": "u", "χ": "x",
+    "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O",
+    "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X",
+})
+
+# Digits and symbols people use as letters ("1gn0re"). Folded only in find_injection's second pass,
+# never the first: in ordinary text "10 rules" must stay "10 rules".
+LEETSPEAK = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+
+# Four or more single letters or digits split by one space, dot, dash, underscore or star: "i g n o r e",
+# "i.g.n.o.r.e". Each unit is exactly one character plus one separator, so there's only one way to
+# match a run — the check stays linear on long input (see the timing test in tests/test_guard.py).
+SPACED_LETTERS = re.compile(r"(?<![\w])(?:\w[ .\-_*]){3,}\w(?![\w])")
+
+
+def _join_spaced_letters(match: re.Match[str]) -> str:
+    """"i g n o r e" -> "ignore": keep only the letters of a spaced-out run."""
+    return re.sub(r"[ .\-_*]", "", match.group(0))
+
+
 def _normalize_for_matching(text: str) -> str:
-    """Undo two look-alike tricks that would otherwise slip past every regex above, unchanged.
+    """Undo the spelling tricks that would otherwise slip past every regex above, unchanged.
 
     1. NFKC ("compatibility composition") folds visually-equivalent characters to the plain form a
        rule is written against — e.g. the fullwidth "＜"/"＞" (U+FF1C/FF1E, common on some IMEs and
@@ -141,11 +173,28 @@ def _normalize_for_matching(text: str) -> str:
        a hidden character between "ign" and "ore", which would stop `\bignore\b` from matching. NFKC
        doesn't remove these, so they're stripped explicitly, after normalizing.
 
+    3. Accents: "ìgnore" → "ignore". NFD splits a letter from its accent mark (category "Mn"), the
+       marks are dropped, and NFC puts the rest back together.
+    4. Look-alike letters from Cyrillic and Greek (HOMOGLYPHS) become the Latin letter they imitate.
+    5. Spaced-out letters ("i g n o r e", "i.g.n.o.r.e") are joined back into one word.
+    6. Every run of whitespace, line breaks included, becomes one space, so an attack split over two
+       lines reads as one sentence.
+
     Only used for injection matching. `size_limit`'s length check and its "{n} chars" reason keep
     using the raw text — silently shrinking what was actually sent would misreport the size.
     """
+    # 1-2.
     folded = unicodedata.normalize("NFKC", text)
-    return "".join(char for char in folded if unicodedata.category(char) != "Cf")
+    folded = "".join(char for char in folded if unicodedata.category(char) != "Cf")
+    # 3.
+    folded = unicodedata.normalize("NFD", folded)
+    folded = unicodedata.normalize("NFC", "".join(char for char in folded if unicodedata.category(char) != "Mn"))
+    # 4.
+    folded = folded.translate(HOMOGLYPHS)
+    # 5.
+    folded = SPACED_LETTERS.sub(_join_spaced_letters, folded)
+    # 6.
+    return " ".join(folded.split())
 
 
 def find_injection(text: str) -> str | None:
@@ -154,13 +203,16 @@ def find_injection(text: str) -> str | None:
     Rules run in INJECTION_RULES's declaration order, so when a message could match more than one
     rule (e.g. "bypass your filters" — see tests/test_guard.py), the earlier rule wins.
     """
-    # 1. Normalize away look-alike tricks (see _normalize_for_matching) before matching anything.
+    # 1. Normalize away spelling tricks (see _normalize_for_matching) before matching anything.
     normalized = _normalize_for_matching(text)
 
-    # 2. Try each compiled pattern in turn; the first hit names the block.
-    for rule, pattern in INJECTION_RULES.items():
-        if pattern.search(normalized):
-            return rule
+    # 2. Try each compiled pattern in turn, first on the normalized text, then on a leetspeak-folded
+    #    copy ("1gn0re" -> "ignore"); the first hit names the block. Two passes, so digits are only
+    #    read as letters when that's the only way a rule matches.
+    for candidate in (normalized, normalized.translate(LEETSPEAK)):
+        for rule, pattern in INJECTION_RULES.items():
+            if pattern.search(candidate):
+                return rule
     return None
 
 
