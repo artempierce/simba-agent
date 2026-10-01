@@ -9,8 +9,8 @@ Harness redesign done (design book 0.3): hooks listed in `harness/settings.py` r
 (#32); one `agent` node replaces intent/reason/generate (#33).
 
 ## Current focus
-Design book 0.4 (safe growth, #67). Phase 1: #62 Sonnet by evals, #63 input
-normalisation, #64 safety-eval follow-ups. Phase 2: #65 tool manifests, #66 approval pause.
+Design book 0.4 (safe growth, #67). Phase 2: #66 approval pause + untrusted-content rule (plan on the
+issue; starts after #65 merges). Phase 1 leftover: #62 Sonnet by evals.
 
 ## Next up (post-MVP)
 - #30 Self-improvement (propose → approve → install), after the tool and approval design is ready
@@ -18,6 +18,7 @@ normalisation, #64 safety-eval follow-ups. Phase 2: #65 tool manifests, #66 appr
 - #39 subagents (needs owner answers)
 
 ## Recently done
+#65 tool manifests: each tool declares a `ToolManifest` (read/write, hosts, cost, per-turn limit, needs_approval, enabled); `tools/registry.py` loads them, undeclared or disabled tools are denied in `before_tool`, `/api/info` lists them ·
 #83 memory M4: `recall_memory` — open a chat by id, keyword search (FTS5); no embeddings (D50; vector design parked in #90) ·
 #82 memory M3: rolling chat summary every 6 owner turns (summarize node, `prompts/summary.md`), recent-chats index in the prompt, Past chats page ·
 #87 memory by talking (list / update / two-step forget), feedback rules always loaded, read-only Memory page; D46–D49 ·
@@ -54,6 +55,7 @@ redesign) · #9 real Claude + token counts in trace · #15 output guard
 | Prompts / personality | `backend/simba/prompts/system.md` (the agent); `summary.md` (chat summaries, #82) |
 | Hook points (model/tool) | `harness/settings.py`, `harness/hooks.py`, `harness/tool_hooks.py`, `nodes/hook_points.py` |
 | Web search | `backend/simba/tools/web_search.py` (Tavily, requires optional `TAVILY_API_KEY`) |
+| Tool permissions | `backend/simba/tools/registry.py` (manifest + registry), each tool file's `MANIFEST`, `docs/contracts.md` § 7.5b |
 | Input checks | `harness/guard.py` (rules), `harness/classifier.py` (local model) |
 | Output checks | `harness/output_guard.py` |
 | Model, cost, tokens | `model.py`; per-chat budget in `harness/settings.py` + `api.py` step 2b |

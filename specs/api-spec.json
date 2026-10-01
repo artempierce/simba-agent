@@ -34,7 +34,7 @@
         "tags": ["health"],
         "operationId": "info",
         "summary": "What the server runs with (#57)",
-        "description": "The model's name (\"fake\" for the free fake model), whether web search is on, and the per-chat budget. Read from what the app built at start-up, so it matches what a chat will really use.",
+        "description": "The model's name (\"fake\" for the free fake model), whether web search is on, the per-chat budget, and every tool's permission manifest (#65). Read from what the app built at start-up, so it matches what a chat will really use.",
         "responses": {
           "200": {
             "description": "The server's setup.",
@@ -235,11 +235,26 @@
       },
       "Info": {
         "type": "object",
-        "required": ["model", "web_search", "chat_budget_usd"],
+        "required": ["model", "web_search", "chat_budget_usd", "tools"],
         "properties": {
           "model": { "type": "string", "examples": ["claude-haiku-4-5", "fake"] },
           "web_search": { "type": "boolean", "description": "True when TAVILY_API_KEY was set at start-up." },
-          "chat_budget_usd": { "type": "number", "examples": [0.5] }
+          "chat_budget_usd": { "type": "number", "examples": [0.5] },
+          "tools": { "type": "array", "description": "Every tool's permission manifest (#65, D34).", "items": { "$ref": "#/components/schemas/ToolManifest" } }
+        }
+      },
+      "ToolManifest": {
+        "type": "object",
+        "description": "What one tool may do. Anything undeclared or with enabled=false is denied in code.",
+        "required": ["name", "access", "hosts", "cost_per_call", "max_calls_per_turn", "needs_approval", "enabled"],
+        "properties": {
+          "name": { "type": "string", "examples": ["web_search"] },
+          "access": { "type": "string", "enum": ["read", "write"] },
+          "hosts": { "type": "array", "items": { "type": "string" }, "description": "Network hosts the tool talks to (shown, not enforced)." },
+          "cost_per_call": { "type": "string", "examples": ["1 Tavily credit", "free"] },
+          "max_calls_per_turn": { "type": ["integer", "null"], "description": "Per-turn call limit; null = none." },
+          "needs_approval": { "type": "boolean" },
+          "enabled": { "type": "boolean" }
         }
       },
       "ChatRequest": {

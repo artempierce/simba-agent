@@ -61,6 +61,7 @@ from simba.harness.settings import CHAT_BUDGET_USD
 from simba.model import cost_usd, make_model, model_name
 from simba.nodes.summarize import make_summarize_node
 from simba.tools.memory_tools import make_memory_tools
+from simba.tools.registry import ToolRegistry
 from simba.tools.web_search import make_web_search_tool
 
 # backend/.env holds SIMBA_FAKE_LLM / ANTHROPIC_API_KEY (git-ignored: the repo is public).
@@ -148,9 +149,13 @@ def create_app(
                 app.state.chats = chats
                 app.state.memory = memory
                 graph_options = {"web_search_tool": resolved_web_search_tool} if resolved_web_search_tool else {}
+                memory_tools = make_memory_tools(memory)
+                # #65: the same manifests the graph's before_tool checks, for GET /api/info.
+                app.state.tool_registry = ToolRegistry.from_tools(
+                    ([resolved_web_search_tool] if resolved_web_search_tool else []) + memory_tools)
                 app.state.graph = build_graph(chat_model, checkpointer, resolved_classifier,
                                               load_profile=memory.core_profile,
-                                              memory_tools=make_memory_tools(memory),
+                                              memory_tools=memory_tools,
                                               summarize=make_summarize_node(chat_model, memory), **graph_options)
                 yield
             finally:
@@ -179,6 +184,7 @@ def create_app(
             "model": model_name(chat_model),
             "web_search": resolved_web_search_tool is not None,
             "chat_budget_usd": CHAT_BUDGET_USD,
+            "tools": app.state.tool_registry.describe(),
         }
 
     @app.post("/api/chat")

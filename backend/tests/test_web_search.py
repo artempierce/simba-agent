@@ -12,8 +12,9 @@ from simba.graph import build_graph
 import json
 from datetime import date
 
+from dataclasses import asdict
+
 from simba.harness.tool_hooks import (
-    MAX_WEB_SEARCH_CALLS_PER_TURN,
     MAX_WEB_SEARCH_QUERY_CHARS,
     TIME_RANGES,
     TOPICS,
@@ -21,13 +22,19 @@ from simba.harness.tool_hooks import (
     valid_web_search_filters,
 )
 from simba.model import FakeChatModel, fake_model
-from simba.nodes.hook_points import before_tool
+from simba.nodes.hook_points import make_before_tool
 from simba.nodes.refuse import REFUSAL_TEXT
 from simba.harness.settings import BEFORE_TOOL
 from simba.nodes.agent import make_node, today_text
-from simba.tools.web_search import MAX_TOOL_RESULT_CHARS, make_tavily_client, make_web_search_tool
+from simba.tools.registry import ToolManifest, ToolRegistry
+from simba.tools.web_search import MANIFEST, MAX_TOOL_RESULT_CHARS, make_tavily_client, make_web_search_tool
 from tests.test_api import parse_sse, running_app
 from tests.node_harness import run_node
+
+# The per-turn search limit now lives in web_search's manifest (#65).
+MAX_WEB_SEARCH_CALLS_PER_TURN = MANIFEST.max_calls_per_turn
+# The before_tool node as the graph builds it, with only web_search declared.
+before_tool = make_before_tool(ToolRegistry({"web_search": MANIFEST}))
 from langchain_core.messages import AIMessage, HumanMessage
 
 
@@ -66,6 +73,7 @@ async def test_search_tool_loops_back_to_agent_and_traces_sources(tmp_path):
     assert stages == ["before_model", "agent", "before_tool", "after_tool", "web_search", "agent", "after_model"], events
     assert client.queries == ["LangGraph tool nodes"]
     assert traces[1]["detail"] == "tool call · web_search"
+    assert "web_search · read · no approval" in traces[2]["detail"]  # #65: the manifest shows in the trace
     assert "https://example.test/tools" in "".join(data["text"] for name, data in events if name == "token")
     tool_reply = next(message for message in model.calls[-1] if message.type == "tool")
     assert "<untrusted_tool_result>" in tool_reply.content
@@ -78,18 +86,85 @@ async def test_missing_tavily_key_disables_search_tool(monkeypatch):
     assert make_web_search_tool() is None
 
 
+def call_payload(name: str, manifest: ToolManifest | None, **context) -> str:
+    """A before_tool hook payload, as hook_points.make_before_tool builds it (manifest None = undeclared)."""
+    return json.dumps({"name": name, "args": {}, "calls_used": 0, "manifest": asdict(manifest) if manifest else None,
+                       **context})
+
+
 def test_before_tool_rejects_malformed_and_unknown_calls():
-    """The tool allowlist fails closed for malformed JSON and names not explicitly enabled."""
+    """The manifest check fails closed: malformed JSON, and a tool nobody declared, are blocked (D34)."""
     assert allowlisted_tool_call("[]").action == "block"
-    assert allowlisted_tool_call('{"name":"shell","args":{}}').rule == "tool-not-allowed"
+    assert allowlisted_tool_call(call_payload("shell", None)).rule == "tool-not-allowed"
+
+
+def test_a_disabled_tool_is_denied_and_an_enabled_one_shows_its_manifest_in_the_trace_reason():
+    """`enabled: false` is an off switch enforced in code; an allowed call's reason is the one-line
+    manifest summary the trace panel shows."""
+    off = ToolManifest(access="write")  # enabled defaults to False: new tools start switched off
+    assert allowlisted_tool_call(call_payload("new_tool", off)).rule == "tool-not-allowed"
+    allowed = allowlisted_tool_call(call_payload("web_search", MANIFEST))
+    assert (allowed.action, allowed.reason) == ("allow", "web_search · read · no approval")
+    asking = ToolManifest(access="write", enabled=True, needs_approval=True)
+    assert allowlisted_tool_call(call_payload("x", asking)).reason == "x · write · needs approval"
 
 
 def test_search_budget_blocks_a_fourth_request_in_one_turn():
-    """The deterministic per-turn cap prevents a model loop from spending search allowance forever."""
+    """The deterministic per-turn cap (the manifest's max_calls_per_turn) stops a model loop from
+    spending the search allowance forever; a manifest with no limit fails closed."""
     from simba.harness.tool_hooks import within_web_search_budget
 
-    assert within_web_search_budget('{"calls_used":2}').action == "allow"
-    assert within_web_search_budget('{"calls_used":3}').rule == "web-search-budget"
+    assert within_web_search_budget(call_payload("web_search", MANIFEST, calls_used=2)).action == "allow"
+    assert within_web_search_budget(call_payload("web_search", MANIFEST, calls_used=3)).rule == "web-search-budget"
+    no_limit = ToolManifest(access="read", enabled=True)
+    assert within_web_search_budget(call_payload("web_search", no_limit)).rule == "web-search-budget"
+
+
+def test_the_registry_holds_only_declared_tools_and_the_search_limit_is_in_its_manifest():
+    """Undeclared tools aren't in the registry (so they are denied); every real tool is declared."""
+    from simba.tools.memory_tools import make_memory_tools
+
+    tools = [make_web_search_tool(FakeSearchClient({"results": []})), *make_memory_tools(None)]
+    registry = ToolRegistry.from_tools(tools)
+    assert {t.name for t in tools} == {entry["name"] for entry in registry.describe()}
+    assert registry.manifest("shell") is None
+    assert registry.max_calls("web_search") == 3 and registry.max_calls("remember") is None
+    assert registry.manifest("web_search").hosts == ("api.tavily.com",)
+    assert registry.manifest("list_memory").access == "read" and registry.manifest("forget_memory").access == "write"
+
+
+async def test_graph_offers_only_enabled_tools_to_the_model():
+    """A tool whose manifest is switched off is not bound to the model at all (and before_tool would
+    deny it anyway if the model named it)."""
+    from langchain_core.tools import tool
+
+    from simba.tools.registry import declare
+
+    @tool("quiet_tool")
+    async def quiet_tool() -> str:
+        """Does nothing."""
+        return "x"
+
+    @tool("loud_tool")
+    async def loud_tool() -> str:
+        """Does nothing."""
+        return "x"
+
+    class RecordingModel(FakeChatModel):
+        """Records which tool names the agent bound on each call."""
+
+        bound_per_call: list[list[str]] = []
+
+        def _answer(self, messages):
+            self.bound_per_call.append(list(self.bound))
+            return super()._answer(messages)
+
+    model = RecordingModel()
+    graph = build_graph(model, memory_tools=[declare(quiet_tool, ToolManifest(access="read")),
+                                             declare(loud_tool, ToolManifest(access="read", enabled=True))])
+    await graph.ainvoke({"messages": [HumanMessage("hi")], "verdict": None, "flag": None,
+                         "tool_call_blocked": None, "web_search_calls": 0})
+    assert model.bound_per_call[0] == ["ReportUnsafe", "loud_tool"]
 
 
 async def test_graph_before_tool_stops_unknown_tool_dispatch():

@@ -471,7 +471,27 @@ async def test_info_reports_the_model_and_search_the_app_really_uses(tmp_path):
     search tool — so a missing TAVILY_API_KEY is visible at a glance instead of discovered by asking."""
     async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (_app, client):
         info = (await client.get("/api/info")).json()
+    tools = {t.pop("name"): t for t in info.pop("tools")}
     assert info == {"model": "fake", "web_search": False, "chat_budget_usd": 0.5}
+    assert set(tools) == {"remember", "list_memory", "recall_memory", "update_memory", "forget_memory"}  # no search tool built
+
+
+async def test_info_lists_each_tools_manifest(tmp_path):
+    """#65: /api/info shows what each tool may do — web_search is read-only, one host, 3 calls a turn —
+    so the owner can see the permissions the code enforces."""
+    from simba.tools.web_search import make_web_search_tool
+
+    class NoSearch:
+        async def ainvoke(self, params):
+            return {"results": []}
+
+    async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db"), web_search_tool=make_web_search_tool(NoSearch())) as (_app, client):
+        tools = {t["name"]: t for t in (await client.get("/api/info")).json()["tools"]}
+    assert tools["web_search"] == {
+        "name": "web_search", "access": "read", "hosts": ["api.tavily.com"], "cost_per_call": "1 Tavily credit",
+        "max_calls_per_turn": 3, "needs_approval": False, "enabled": True,
+    }
+    assert tools["forget_memory"]["access"] == "write" and tools["list_memory"]["access"] == "read"
 
 
 async def test_info_says_search_is_on_when_a_search_tool_was_built(tmp_path):

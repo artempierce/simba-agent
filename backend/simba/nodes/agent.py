@@ -28,10 +28,10 @@ from langchain_core.messages import AIMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
 from simba.common import emit_trace, neutralise_tag, recent, text_of, tokens_used
-from simba.harness.tool_hooks import MAX_WEB_SEARCH_CALLS_PER_TURN
 from simba.prompts import load
 from simba.schemas import ReportUnsafe
 from simba.state import ChatState
+from simba.tools.registry import ToolRegistry
 
 # How much conversation history the agent sees — wide enough that the user can refer back several
 # turns (this was generate.py's HISTORY_LIMIT before #33 merged the nodes).
@@ -91,6 +91,7 @@ def make_node(
     model: BaseChatModel,
     tools: Sequence[BaseTool] = (),
     load_profile: Callable[[], Awaitable[dict[str, list[str]]]] | None = None,
+    registry: ToolRegistry | None = None,
 ):
     """Build the agent node with its optional read-only tools (docs/contracts.md § 7.4).
 
@@ -100,7 +101,8 @@ def make_node(
          message (`state["flag"]`, #8) — our own words and the flag string only, never user text,
          so the note itself can't be hijacked by anything the user wrote.
       2. Sends it with the last HISTORY_LIMIT messages, `report_unsafe` and configured tools bound —
-         the tools only while this turn's search budget lasts (MAX_WEB_SEARCH_CALLS_PER_TURN).
+         the tools only while this turn's search budget lasts (web_search's `max_calls_per_turn`
+         in the registry's manifests, #65; no registry means no limit to enforce here).
          LangGraph routes tool-call messages to the tool node; ordinary text goes to after_model.
       3. Reads the reply: a `report_unsafe` call writes a blocked verdict ("agent-injection" or
          "agent-harmful") naming the model's own reason, and is NOT appended to `messages` — the
@@ -116,7 +118,7 @@ def make_node(
     once. None (tests, or no memory) means no profile.
 
     Why a factory: LangGraph nodes take only `state`, but this node needs a model, its configured
-    tools and the memory reader. graph.py binds those once when it builds the graph.
+    tools, the memory reader and the tool registry. graph.py binds those once when it builds the graph.
     """
 
     async def agent(state: ChatState) -> dict:
@@ -141,7 +143,8 @@ def make_node(
         #    messages can still receive normal text replies. Once this turn's search budget is spent,
         #    web_search is no longer offered, so the model has to answer with what it found
         #    (graph.py's after_before_tool ends the turn if it asks anyway); `remember` (#81) stays.
-        budget_left = state["web_search_calls"] < MAX_WEB_SEARCH_CALLS_PER_TURN
+        search_limit = registry.max_calls("web_search") if registry else None
+        budget_left = search_limit is None or state["web_search_calls"] < search_limit
         offered = [ReportUnsafe, *(t for t in tools if budget_left or t.name != "web_search")]
         reply = await model.bind_tools(offered).ainvoke(prompt)
         tokens = tokens_used(reply)

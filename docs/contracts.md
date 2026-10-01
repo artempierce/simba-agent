@@ -221,20 +221,39 @@ Tests inject a fake client and never call the network.
   cut to 80 characters. Results reach the model as Tavily's JSON, so news items keep `published_date`.
 - `before_tool` also runs `valid_web_search_filters`: an unknown `topic` or `time_range` is blocked.
 
-- A graph-level `before_tool` node checks every call against the exact `web_search` allowlist and
-  requires a non-empty query no longer than `MAX_WEB_SEARCH_QUERY_CHARS = 500`. A rejected call
-  never reaches `ToolNode`; a mixed valid/invalid batch is rejected atomically with one ToolMessage
-  returned per call id.
-- `MAX_WEB_SEARCH_CALLS_PER_TURN = 3` bounds provider usage per user turn; attempts, including
-  rejected calls, count toward the limit. Once it is reached the agent binds only `ReportUnsafe`,
-  and a call requested anyway is denied and routed to `refuse`, so one turn makes at most
-  `MAX_WEB_SEARCH_CALLS_PER_TURN + 1` agent model calls.
+- A graph-level `before_tool` node (built by `make_before_tool(registry)`) checks every call against
+  the tool's manifest (§ 7.5b) and requires a non-empty query no longer than
+  `MAX_WEB_SEARCH_QUERY_CHARS = 500`. A rejected call never reaches `ToolNode`; a mixed
+  valid/invalid batch is rejected atomically with one ToolMessage returned per call id.
+- web_search's manifest sets `max_calls_per_turn = 3`, which bounds provider usage per user turn;
+  attempts, including rejected calls, count toward the limit. Once it is reached the agent binds only
+  `ReportUnsafe` (and the tools without that limit), and a call requested anyway is denied and routed
+  to `refuse`, so one turn makes at most `max_calls_per_turn + 1` agent model calls.
 - Search output is capped at `MAX_TOOL_RESULT_CHARS = 8000`. `after_tool` flags known injection
   phrasing; if a hook itself fails, the result is withheld (fail closed).
 - Results are wrapped in `<untrusted_tool_result>` after escaping any matching fake boundary tags.
   The prompt tells the agent to treat the content as data and cite its result URLs.
 - Trace stages: `before_tool`, `web_search`, and `after_tool`. Provider failures return a generic
   tool result and error trace without exposing provider exception text or credentials.
+
+### § 7.5b Tool manifests (`simba/tools/registry.py`, #65, D34)
+
+Every tool declares a frozen `ToolManifest` and attaches it with `declare(tool, manifest)`
+(stored in the tool's `metadata["manifest"]`):
+
+| Field | Meaning | Enforced? |
+|---|---|---|
+| `access` | `"read"` or `"write"` | read by #66's approval rule |
+| `hosts` | network hosts the tool talks to | shown only |
+| `cost_per_call` | plain-words cost, e.g. `"1 Tavily credit"` | shown only |
+| `max_calls_per_turn` | per-turn call limit, `None` = none | yes (`within_web_search_budget`, agent binding, routing) |
+| `needs_approval` | owner must approve each call | not yet (#66) |
+| `enabled` | default `False` | yes: a disabled tool is not offered to the model and is denied |
+
+`ToolRegistry.from_tools(tools)` collects the manifests. `build_graph` offers and runs only declared,
+enabled tools; `before_tool` puts the manifest (or `null`) in each call's hook payload and
+`allowlisted_tool_call` blocks a call with no manifest or a disabled one (`tool-not-allowed`). Its
+allow reason is the trace line `{name} · {access} · {no approval|needs approval}`.
 
 ## § 8 Graph (`simba/graph.py`)
 
@@ -273,8 +292,11 @@ classifier as above, and stores `app.state.graph`, `app.state.checkpointer` (and
 `app.state.chats`).
 
 - `GET /api/health` → `{"ok": true}`.
-- `GET /api/info` → `{"model": str, "web_search": bool, "chat_budget_usd": float}` (#57): `model_name(chat_model)`
-  (`"fake"` for the fake model), whether a search tool was built, and `CHAT_BUDGET_USD`.
+- `GET /api/info` → `{"model": str, "web_search": bool, "chat_budget_usd": float, "tools": [Manifest]}` (#57, #65):
+  `model_name(chat_model)` (`"fake"` for the fake model), whether a search tool was built,
+  `CHAT_BUDGET_USD`, and every tool's permission manifest (§ 7.5b), each
+  `{"name", "access": "read"|"write", "hosts": [str], "cost_per_call": str, "max_calls_per_turn": int|null,
+  "needs_approval": bool, "enabled": bool}`.
 - `POST /api/chat`, body `{"message": str, "chat_id": str | null}` → `text/event-stream`:
 
 | Event | Data | When |
