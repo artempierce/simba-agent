@@ -260,7 +260,9 @@ allow reason is the trace line `{name} · {access} · {no approval|needs approva
 
 - `approval_rule` (last `before_tool` hook) flags a valid call with rule `needs-approval` when its
   manifest has `needs_approval`, or it is `access: "write"` and the turn has read web results. Memory
-  writes after web results never get here: `memory_from_owner` blocks them first.
+  saves (`remember`, `update_memory`) after web results get here too (#96, D52), once
+  `memory_from_owner`'s own-words and no-secrets checks have passed; `forget_memory` after web results
+  is blocked there first.
 - `before_tool` lists flagged calls in `approval_calls`; `after_before_tool` then routes to `approval`.
 - The `approval` node calls `interrupt({"calls": approval_calls})`; the checkpointer holds the turn.
   Resumed with `Command(resume={"approve": bool})`, it re-runs: only `approve is True` approves
@@ -456,10 +458,9 @@ text, why, source_chat_id) -> (fact, "added" | "updated", previous_text)`: a sam
 `build_graph(..., memory_tools=[...])` adds them to the tool loop; the agent offers it even after the
 search budget is spent. `before_tool` payload adds `turn_read_untrusted` (a web_search result after the
 newest human message) and `user_text` (the last `USER_TEXT_MESSAGES` = 6 human messages); only
-web_search calls count toward `web_search_calls`. Hook `memory_from_owner` blocks: after untrusted
-content (`memory-after-untrusted`), key-word overlap with `user_text` < `OWN_WORDS_OVERLAP` 0.5
+web_search calls count toward `web_search_calls`. Hook `memory_from_owner` blocks: key-word overlap with `user_text` < `OWN_WORDS_OVERLAP` 0.5
 (`memory-not-own-words`), key-shaped text (`memory-secret`). `ALLOWED_TOOLS = ("web_search", "remember", "list_memory", "update_memory", "forget_memory")`; `memory_from_owner`
-applies own-words and secrets to remember/update_memory (`MEMORY_WRITES`), and the untrusted-content block to all three writes.
+applies own-words and secrets to remember/update_memory (`MEMORY_WRITES`) and blocks forget_memory after untrusted content (`memory-after-untrusted`). After web results a remember/update_memory that passes isn't blocked: `approval_rule` holds it for the card (#96, D52).
 
 ## § 11 Frontend
 

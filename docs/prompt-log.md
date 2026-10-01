@@ -3,6 +3,17 @@
 Why `backend/simba/prompts/system.md` changed, newest first. One entry per change: what, why, and how
 it was checked. (#10 asked for this before/after log.)
 
+## 2026-10-01 — a fact and a search in one message; weather searches (#96)
+
+- **Before:** nothing on a message that both states a fact and needs a search; search topic: "For news
+  use the news topic with a time range".
+- **After:** "One message can mean two things" — save the fact *and* search, and save first (or in the
+  same step), because a save after web results waits for the user's approval (D52). Weather,
+  forecasts, prices and other live facts that aren't news articles use the general topic, no time range.
+- **Why:** owner bug report: "Yeah, I live in Glendale, CA" after a weather question searched first,
+  so the save was blocked; the `news` topic turned the weather search into flight ads.
+- **Checked:** backend tests with the fake model; the owner tries it on real Claude by hand (paid).
+
 ## 2026-10-01 — forget waits for the approval card (#66b)
 
 - **Before:** forget_memory "deletes nothing until you have asked 'Forget …? (yes/no)' and they answer

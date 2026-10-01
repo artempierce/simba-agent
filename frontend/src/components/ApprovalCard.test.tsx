@@ -36,5 +36,11 @@ describe('ApprovalCard', () => {
     expect(describeCall(forget, [])).toBe('Forget: “fact #3”')
     expect(describeCall({ ...forget, args: { everything: true } }, [])).toBe('Forget everything Simba remembers about you')
     expect(describeCall({ ...forget, tool: 'send_note', args: { text: 'hi' } }, [])).toBe('send_note {"text":"hi"}')
+    // #96: a memory save or change after web results waits for the card too, shown in words.
+    expect(describeCall({ ...forget, tool: 'remember', args: { kind: 'user', fact: 'Lives in Glendale, CA' } }, []))
+      .toBe('Remember: “Lives in Glendale, CA”')
+    const facts = [{ id: 3, kind: 'user', text: 'Lives in London' }] as Fact[]
+    expect(describeCall({ ...forget, tool: 'update_memory', args: { fact_id: 3, text: 'Lives in Berlin' } }, facts))
+      .toBe('Change “Lives in London” to “Lives in Berlin”')
   })
 })

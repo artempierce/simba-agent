@@ -11,7 +11,7 @@ the history window is trimmed to start with a human message; and every run repor
 from langchain_core.messages import AIMessage, HumanMessage
 
 from simba.model import fake_model
-from simba.nodes.agent import HISTORY_LIMIT, make_node
+from simba.nodes.agent import EMPTY_REPLY_TEXT, HISTORY_LIMIT, make_node
 from tests.node_harness import run_node
 
 
@@ -25,6 +25,16 @@ async def test_safe_message_answers_and_is_appended():
     assert len(traces) == 1
     assert traces[0]["stage"] == "agent" and traces[0]["status"] == "ok"
     assert traces[0]["detail"] == f"answer · {traces[0]['output_tokens']} tokens out"
+
+
+async def test_an_empty_answer_becomes_the_fixed_reply():
+    """#96: real Claude once ended a turn with no text right after a denied tool call, and the owner
+    got an empty bubble. An empty (or whitespace-only) answer is replaced by EMPTY_REPLY_TEXT, set in
+    code, and the trace says so."""
+    for empty in ("", "   "):
+        update, traces = await run_node(make_node(fake_model(reply=empty)), {"messages": [HumanMessage("hi")]})
+        assert update["messages"][0].content == EMPTY_REPLY_TEXT
+        assert traces[0]["detail"] == "empty answer · fixed reply"
 
 
 async def test_report_unsafe_blocks_with_rule_and_is_not_saved():

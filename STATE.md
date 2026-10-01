@@ -9,8 +9,8 @@ Harness redesign done (design book 0.3): hooks listed in `harness/settings.py` r
 (#32); one `agent` node replaces intent/reason/generate (#33).
 
 ## Current focus
-Design book 0.4 (safe growth, #67). Phase 2 done (#65, #66). Next: phase 3 skills (needs a plan);
-phase 1 leftover: #62 Sonnet by evals. Design book needs a republish once #66b is merged.
+Design book 0.4 (safe growth, #67). Phase 2 done (#65, #66). Next: phase 3 skills #95 (planned);
+phase 1 leftover: #62 Sonnet by evals. Design book needs a republish (#66b, #96 changes).
 
 ## Next up (post-MVP)
 - #30 Self-improvement (propose → approve → install), after the tool and approval design is ready
@@ -18,6 +18,7 @@ phase 1 leftover: #62 Sonnet by evals. Design book needs a republish once #66b i
 - #39 subagents (needs owner answers)
 
 ## Recently done
+#96 fix: a fact said in a search turn waits for the approval card instead of being blocked (D52); prompt saves before searching; weather uses the general topic; an empty answer becomes a fixed line ·
 #66b approve / deny card (`ApprovalCard.tsx`, resume via `streamResume`, card kept on reopen); `forget_memory` waits for the card (D51 replaces D47's next-message yes) ·
 #66a approval pause (backend): `approval_rule` hook, `approval` node with `interrupt()`, SSE `approval` + `POST /api/chat/{id}/resume`, safety cases w01–w03 (not run); no real tool pauses yet ·
 #65 tool manifests: each tool declares a `ToolManifest` (read/write, hosts, cost, per-turn limit, needs_approval, enabled); `tools/registry.py` loads them, undeclared or disabled tools are denied in `before_tool`, `/api/info` lists them ·
@@ -25,7 +26,7 @@ phase 1 leftover: #62 Sonnet by evals. Design book needs a republish once #66b i
 #82 memory M3: rolling chat summary every 6 owner turns (summarize node, `prompts/summary.md`), recent-chats index in the prompt, Past chats page ·
 #87 memory by talking (list / update / two-step forget), feedback rules always loaded, read-only Memory page; D46–D49 ·
 #55 search prompt: "When to search" principles (merged without an eval run; owner tests by hand) ·
-#81 memory M2: `remember` tool saves facts itself (own words only, never after web results, no secrets, dedupe) + Undo ·
+#81 memory M2: `remember` tool saves facts itself (own words only, no secrets, dedupe; after web results it waits for the card, #96) + Undo ·
 #80 memory M1: fact store, Memory tab (sidebar), core profile (≤ 15 user facts) in the prompt ·
 #79 memory design: auto facts with code limits, summaries every 6 turns, hybrid recall; D40–D45 ·
 #77 every eval is plan-only unless `--run` (owner: no paid runs until reviewed) ·

@@ -86,9 +86,10 @@ def make_web_search_tool(search_client: SearchClient | None = None) -> BaseTool 
     ) -> str:
         """Search the web and return short source snippets with URLs and, for news, published dates.
 
-        For news, current events or anything "today", "latest" or "this week", use topic="news" and
+        For news and current events ("today's news", "latest", "this week"), use topic="news" and
         time_range="day" (or "week" if a day finds too little). Don't put a year or month in the query
-        to make it recent; use time_range. For timeless facts use topic="general" and no time_range.
+        to make it recent; use time_range. For timeless facts, and for live facts that aren't news
+        articles (weather, forecasts, prices), use topic="general" and no time_range.
         """
         started = time.perf_counter()
         # 1. The graph-level before_tool node already validated the tool name, query and filters.

@@ -504,3 +504,14 @@ async def test_info_says_search_is_on_when_a_search_tool_was_built(tmp_path):
 
     async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db"), web_search_tool=make_web_search_tool(NoSearch())) as (_app, client):
         assert (await client.get("/api/info")).json()["web_search"] is True
+
+
+async def test_an_empty_answer_reaches_the_page_as_the_fixed_reply(tmp_path):
+    """#96: when the model writes nothing, the page still gets one answer — EMPTY_REPLY_TEXT — not an
+    empty bubble."""
+    from simba.nodes.agent import EMPTY_REPLY_TEXT
+
+    async with running_app(model=fake_model(reply=""), db_path=str(tmp_path / "t.db")) as (_app, client):
+        events = parse_sse((await client.post("/api/chat", json={"message": "hi"})).text)
+    assert "".join(d["text"] for e, d in events if e == "token") == EMPTY_REPLY_TEXT
+    assert events[-1][0] == "done"

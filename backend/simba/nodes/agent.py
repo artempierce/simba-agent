@@ -44,6 +44,10 @@ MAX_DETAIL_CHARS = 80
 # TAVILY_API_KEY) and wrote no text of its own. Said plainly, so the user knows why nothing was searched.
 UNAVAILABLE_TOOL_TEXT = "I can't use that tool right now (it isn't set up), so I'll answer from what I already know."
 
+# #96: the reply when the model ends a turn with no text and no tool call (seen on real Claude right
+# after a tool request was denied). Without it the turn ends with an empty bubble and no explanation.
+EMPTY_REPLY_TEXT = "Sorry, I couldn't finish that. Could you say it again?"
+
 
 def today_text() -> str:
     """Today's date in words, e.g. "Tuesday, 29 September 2026" (server local time, #52).
@@ -112,6 +116,8 @@ def make_node(
          switched off) is dropped: the reply becomes plain text — the model's own words, or
          UNAVAILABLE_TOOL_TEXT — so it goes to after_model like any answer. Without this the graph
          would route to a before_tool node that doesn't exist and crash the turn.
+      5. #96: a reply with no text and no tool call becomes EMPTY_REPLY_TEXT, so the owner is never
+         left with an empty answer.
 
     Step 1 also adds the always-loaded memory (#80, #87): `load_profile()` returns the newest `user`
     and `feedback` facts (memory.MemoryStore.core_profile), read fresh every turn so a change counts at
@@ -168,6 +174,12 @@ def make_node(
             reply = AIMessage(content=text, usage_metadata=reply.usage_metadata)
             detail = f"asked for unavailable tool · {unknown[0]}{memory_note}"[:MAX_DETAIL_CHARS]
             emit_trace("agent", "ok", detail, start, tokens)
+            return {"messages": [reply]}
+
+        # 5. An empty answer gets a fixed line set in code, never left blank.
+        if not reply.tool_calls and not text_of(reply).strip():
+            reply = AIMessage(content=EMPTY_REPLY_TEXT, usage_metadata=reply.usage_metadata)
+            emit_trace("agent", "ok", f"empty answer · fixed reply{memory_note}"[:MAX_DETAIL_CHARS], start, tokens)
             return {"messages": [reply]}
 
         detail = (

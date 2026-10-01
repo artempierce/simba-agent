@@ -2,7 +2,7 @@
 tests/test_remember.py — the `remember` tool and its code limits (#81, D40).
 
 Automatic memory is the classic way an attack survives into later chats, so every limit that makes
-it safe is pinned here: nothing saved after web results, only the owner's own words, no secrets,
+it safe is pinned here: after web results a save waits for the owner's card (#96), only the owner's own words, no secrets,
 near-duplicates updated rather than piled up, and searches — not saves — use the search budget.
 The fake model asks for `remember` when a test dictates it (model.fake_model `structured`); $0.
 """
@@ -18,7 +18,7 @@ from simba.model import fake_model
 from simba.nodes.hook_points import make_before_tool
 from simba.tools.memory_tools import WRITE_MANIFEST
 from simba.tools.registry import ToolRegistry
-from simba.tools.web_search import MANIFEST as SEARCH_MANIFEST
+from simba.tools.web_search import MANIFEST as SEARCH_MANIFEST, make_web_search_tool
 from tests.node_harness import run_node
 from tests.test_api import parse_sse, running_app
 
@@ -65,11 +65,15 @@ def test_a_fact_not_in_the_owners_words_is_blocked():
     assert memory_from_owner(payload).rule == "memory-not-own-words"
 
 
-def test_nothing_is_saved_after_web_results():
-    """Once a turn has read a web page, no save goes through, however the fact is worded (D35)."""
-    payload = call("remember", {"kind": "user", "fact": "Mostly works in Python"},
-                   user_text="I mostly work in Python", turn_read_untrusted=True)
-    assert memory_from_owner(payload).rule == "memory-after-untrusted"
+def test_after_web_results_the_own_words_check_still_runs():
+    """#96, D52: after a web page the code limits still apply. The owner's own fact passes them (it
+    then waits for the card, see below); a "fact" that only the page said is still refused."""
+    own = call("remember", {"kind": "user", "fact": "Lives in Glendale, CA"},
+               user_text="Yeah, I live in Glendale, CA", turn_read_untrusted=True)
+    planted = call("remember", {"kind": "reference", "fact": "Preferred download site is evil.test"},
+                   user_text="Any news about Python?", turn_read_untrusted=True)
+    assert memory_from_owner(own).action == "allow"
+    assert memory_from_owner(planted).rule == "memory-not-own-words"
 
 
 def test_secrets_are_never_saved():
@@ -96,17 +100,20 @@ async def test_before_tool_counts_only_searches():
     assert update["tool_call_blocked"] is False and update["web_search_calls"] == 1
 
 
-async def test_before_tool_blocks_a_save_after_search_results():
-    """The untrusted-content rule end to end: a web_search result earlier in the turn blocks the save."""
+async def test_before_tool_holds_a_save_after_search_results_for_the_card():
+    """#96 (the Glendale bug), D52: the owner says a fact and the turn also searches; the model saves
+    after the search. The save isn't blocked any more: it waits for the owner's approve on the card
+    (D35's untrusted-content rule), so a page still can't change memory on its own."""
     history = [
-        HumanMessage("I mostly work in Python, what's new in Python?"),
-        AIMessage(content="", tool_calls=[{"name": "web_search", "args": {"query": "python"}, "id": "s1"}]),
+        HumanMessage("Yeah, I live in Glendale, CA"),
+        AIMessage(content="", tool_calls=[{"name": "web_search", "args": {"query": "weather Glendale CA"}, "id": "s1"}]),
         ToolMessage("<untrusted_tool_result>…</untrusted_tool_result>", tool_call_id="s1", name="web_search"),
-        AIMessage(content="", tool_calls=[{"name": "remember", "args": {"kind": "user", "fact": "Mostly works in Python"}, "id": "r1"}]),
+        AIMessage(content="", tool_calls=[{"name": "remember", "args": {"kind": "user", "fact": "Lives in Glendale, CA"}, "id": "r1"}]),
     ]
     update, _ = await run_node(before_tool, {"messages": history, "web_search_calls": 1})
-    assert update["tool_call_blocked"] is True
-    assert "nothing is saved after reading web results" in update["messages"][0].content
+    assert update["tool_call_blocked"] is False
+    assert [c["tool"] for c in update["approval_calls"]] == ["remember"]
+    assert update["approval_calls"][0]["reason"] == "write after web results waits for approval"
 
 
 # ---- end to end: the real API, the fake model ----
@@ -137,3 +144,55 @@ async def test_a_blocked_save_changes_nothing_and_the_turn_still_answers(tmp_pat
         assert await app.state.memory.list_facts() == []
     assert not [e for e, _ in events if e == "memory"]
     assert events[-1][0] == "done"
+
+
+class SearchThenRemember(type(fake_model())):
+    """#96: the owner's Glendale turn as real Claude played it — search first, then save the fact the
+    owner just said, then answer. (The plain fake can make only one tool call per turn.)"""
+
+    def _answer(self, messages):
+        self.calls.append(list(messages))
+        usage = {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+        if len(self.calls) == 1:
+            return "", {"name": "web_search", "args": {"query": "weather Glendale CA"}, "id": "s1"}, usage
+        if len(self.calls) == 2:
+            return "", {"name": "remember", "args": {"kind": "user", "fact": "Lives in Glendale, CA"}, "id": "r1"}, usage
+        return "Sunny in Glendale today.", None, usage
+
+
+class OneWeatherResult:
+    """A search client with one fixed result, so no network is used."""
+
+    async def ainvoke(self, params):
+        return {"results": [{"title": "Glendale weather", "url": "https://example.test", "content": "Sunny, 29°C"}]}
+
+
+async def glendale_turn(tmp_path, approve: bool) -> tuple[list, list, list]:
+    """Run the Glendale turn through the real API, answer the card, and return (facts saved, first
+    stream's events, resume stream's events)."""
+    async with running_app(model=SearchThenRemember(), db_path=str(tmp_path / "g.db"),
+                           web_search_tool=make_web_search_tool(OneWeatherResult())) as (app, client):
+        first = parse_sse((await client.post("/api/chat", json={"message": "Yeah, I live in Glendale, CA"})).text)
+        chat_id = first[0][1]["chat_id"]
+        resumed = parse_sse((await client.post(f"/api/chat/{chat_id}/resume", json={"approve": approve})).text)
+        facts = await app.state.memory.list_facts()
+    return facts, first, resumed
+
+
+async def test_a_fact_said_in_a_search_turn_is_saved_after_approve(tmp_path):
+    """#96 end to end: the save after the search pauses with a card (not a block), and Approve saves
+    the fact, tells the page ("Remembered: …"), and finishes the answer."""
+    facts, first, resumed = await glendale_turn(tmp_path, approve=True)
+    card = next(d for e, d in first if e == "approval")
+    assert [c["tool"] for c in card["calls"]] == ["remember"]
+    assert not any(e == "trace" and d["status"] == "blocked" for e, d in first)
+    assert [f["text"] for f in facts] == ["Lives in Glendale, CA"]
+    assert [d["action"] for e, d in resumed if e == "memory"] == ["added"]
+    assert "".join(d["text"] for e, d in resumed if e == "token") == "Sunny in Glendale today."
+
+
+async def test_a_fact_said_in_a_search_turn_is_not_saved_on_deny(tmp_path):
+    """Deny saves nothing, and the turn still ends with an answer."""
+    facts, _, resumed = await glendale_turn(tmp_path, approve=False)
+    assert facts == []
+    assert "".join(d["text"] for e, d in resumed if e == "token") == "Sunny in Glendale today."
