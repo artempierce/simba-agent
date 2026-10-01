@@ -7,12 +7,19 @@
 import type { ApprovalCall, Fact } from './types'
 
 /**
- * One call in plain words. forget_memory gets the facts' own text; any other tool shows its name and
- * arguments as JSON (a tool we don't know yet should still show exactly what it would do).
+ * One call in plain words. The memory tools get the facts' own text (#96: remember and update_memory
+ * reach the card when they come after web results, D52); any other tool shows its name and arguments
+ * as JSON (a tool we don't know yet should still show exactly what it would do).
  *
- * Example: forget_memory {fact_ids: [3]} with fact 3 "Works at Acme" -> 'Forget: “Works at Acme”'
+ * Example: forget_memory {fact_ids: [3]} with fact 3 "Works at Acme" -> 'Forget: “Works at Acme”';
+ * remember {fact: "Lives in Glendale, CA"} -> 'Remember: “Lives in Glendale, CA”'
  */
 export function describeCall(call: ApprovalCall, facts: Fact[]): string {
+  if (call.tool === 'remember') return `Remember: “${String(call.args.fact)}”`
+  if (call.tool === 'update_memory') {
+    const old = facts.find((f) => f.id === call.args.fact_id)?.text ?? `fact #${String(call.args.fact_id)}`
+    return `Change “${old}” to “${String(call.args.text)}”`
+  }
   if (call.tool === 'forget_memory') {
     if (call.args.everything === true) return 'Forget everything Simba remembers about you'
     const ids = Array.isArray(call.args.fact_ids) ? call.args.fact_ids : []

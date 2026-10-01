@@ -745,7 +745,8 @@ Safety
           <tr><td>D48</td><td class="wrap">Learned procedural memory: up to 15 <code>feedback</code> facts are always in the prompt, next to the <code>user</code> profile</td><td class="wrap">Sol, 30 Sep, #87</td></tr>
           <tr><td>D49</td><td class="wrap">A read-only Memory page behind header tabs Chat | Memory replaces the sidebar Memory tab</td><td class="wrap">Sol, 30 Sep, #87</td></tr>
           <tr><td>D50</td><td class="wrap">Recall without an embedding model, like Claude Code's memory: an index of recent chats with short ids in the prompt, <code>recall_memory(chat=…)</code> to open one, <code>recall_memory(query=…)</code> keyword search (SQLite FTS5)</td><td class="wrap">Sol, 30 Sep, #83</td></tr>
-          <tr><td>D51</td><td class="wrap">Which writes get an approval card: <code>remember</code> / <code>update_memory</code> (undoable, code limits) don't; <code>forget_memory</code> (can't be undone) always does (replaces D47). After web results every write still waits; memory writes stay blocked</td><td class="wrap">Sol, 30 Sep, #66</td></tr>
+          <tr><td>D51</td><td class="wrap">Which writes get an approval card: <code>remember</code> / <code>update_memory</code> (undoable, code limits) don't; <code>forget_memory</code> (can't be undone) always does (replaces D47). After web results every write still waits; memory writes stay blocked (that part replaced by D52)</td><td class="wrap">Sol, 30 Sep, #66</td></tr>
+          <tr><td>D52</td><td class="wrap">A memory save after web results waits for your approval card instead of being blocked; the own-words and no-secrets checks still run first; forgetting after web results stays blocked (replaces that part of D51)</td><td class="wrap">Sol, 1 Oct, #96</td></tr>
         </tbody>
       </table></div>
     </section>

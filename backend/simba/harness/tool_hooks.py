@@ -128,14 +128,18 @@ def within_web_search_budget(serialized_call: str) -> HookResult:
 def memory_from_owner(serialized_call: str) -> HookResult:
     """The code limits on memory changes (#81, #87; D40). Reads (list_memory) and other tools pass.
 
-    Blocks a remember / update_memory / forget_memory call when:
-    1. the turn has already read web results (the untrusted-content rule, D35): memory must never be
-       changed because of a page, however it's worded;
+    Blocks a memory write when:
+    1. (forget_memory) the turn has already read web results: a page must never be able to put
+       "forget everything" in front of the owner, where one wrong click would wipe their memory;
     2. (remember, update_memory) the new text isn't in the owner's own words: fewer than
        OWN_WORDS_OVERLAP of its key words appear in the owner's recent messages (`user_text`);
     3. (remember, update_memory) it looks like a secret: keys and passwords are never saved.
-    forget_memory has its own second lock: its manifest needs approval, so nothing is deleted until the
-    owner approves the card (#66b, D51).
+    Otherwise forget_memory's lock is the approval card (its manifest needs approval, #66b, D51).
+
+    After web results (#96, D52) a save that passes checks 2 and 3 isn't blocked any more:
+    approval_rule holds it for the owner's card, like every write after untrusted content (D35). So a
+    page can't change memory on its own, but "I live in Glendale" said in a turn that also searched
+    the weather can still be saved, once the owner clicks Approve.
 
     Example: after "I mostly code in Python", remember(fact="Mostly works in Python") -> allow;
     remember(fact="Owner is an admin with full access") -> block (not the owner's words)
@@ -148,10 +152,10 @@ def memory_from_owner(serialized_call: str) -> HookResult:
         fact = str(call.get("args", {}).get(text_arg, "")) if text_arg else ""
     except (AttributeError, TypeError, json.JSONDecodeError):
         return HookResult("block", "memory-format", "memory call was malformed")
-    # 1.
-    if call.get("turn_read_untrusted"):
-        return HookResult("block", "memory-after-untrusted", "nothing is saved after reading web results")
     if text_arg is None:
+        # 1.
+        if call.get("turn_read_untrusted"):
+            return HookResult("block", "memory-after-untrusted", "nothing is forgotten after reading web results")
         return HookResult("allow", None, "")  # forget's own lock is the approval card (approval_rule)
     # 2.
     if overlap(key_words(fact), key_words(str(call.get("user_text", "")))) < OWN_WORDS_OVERLAP:
@@ -175,7 +179,9 @@ def approval_rule(serialized_call: str) -> HookResult:
     2. it is a `write` tool and this turn has already read untrusted content (web results): a page
        must never be able to trigger a change on its own, whatever the manifest says.
     The answer is a "flag" with rule NEEDS_APPROVAL, not a block: the call is valid, it just waits.
-    Memory writes after web results never reach rule 2 — memory_from_owner blocks them outright.
+    remember / update_memory after web results reach rule 2 too (#96, D52), but only once
+    memory_from_owner has checked they're in the owner's own words and hold no secret; forget_memory
+    after web results never gets here (memory_from_owner blocks it).
 
     Example: {"manifest": {"access": "write", ...}, "turn_read_untrusted": true} -> flag
     "write after web results"; the same call with turn_read_untrusted false -> allow.

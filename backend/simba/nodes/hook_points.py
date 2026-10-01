@@ -116,7 +116,7 @@ def make_before_tool(registry: ToolRegistry):
 
         Each call's hook payload also carries (#81, #65):
           calls_used           searches made so far this turn — only web_search calls count
-          turn_read_untrusted  whether this turn already got web results (no memory saves after that)
+          turn_read_untrusted  whether this turn already got web results (a write after that waits for the card)
           user_text            the owner's last USER_TEXT_MESSAGES messages (remember's own-words check)
           manifest             the tool's manifest from the registry as a dict, None if undeclared
         """
