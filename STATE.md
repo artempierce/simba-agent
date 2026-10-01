@@ -9,8 +9,8 @@ Harness redesign done (design book 0.3): hooks listed in `harness/settings.py` r
 (#32); one `agent` node replaces intent/reason/generate (#33).
 
 ## Current focus
-Design book 0.4 (safe growth, #67). Phase 2 done (#65, #66). Next: phase 3 skills #95 (planned);
-phase 1 leftover: #62 Sonnet by evals. Design book needs a republish (#66b, #96 changes).
+Design book 0.4 (safe growth, #67). Phase 2 done (#65, #66). Phase 3 skills done (#95).
+Next: phase 4 proposals (#30, needs a ticket); phase 1 leftover: #62 Sonnet by evals. Design book needs a republish (#66b, #96 changes).
 
 ## Next up (post-MVP)
 - #30 Self-improvement (propose → approve → install), after the tool and approval design is ready
@@ -18,6 +18,7 @@ phase 1 leftover: #62 Sonnet by evals. Design book needs a republish (#66b, #96 
 - #39 subagents (needs owner answers)
 
 ## Recently done
+#95 skills: `simba/skills/<name>.md` (name + description), index in the prompt, `load_skill` tool, first skill `explain-concept`; D53 ·
 #96 fix: a fact said in a search turn waits for the approval card instead of being blocked (D52); prompt saves before searching; weather uses the general topic; an empty answer becomes a fixed line ·
 #66b approve / deny card (`ApprovalCard.tsx`, resume via `streamResume`, card kept on reopen); `forget_memory` waits for the card (D51 replaces D47's next-message yes) ·
 #66a approval pause (backend): `approval_rule` hook, `approval` node with `interrupt()`, SSE `approval` + `POST /api/chat/{id}/resume`, safety cases w01–w03 (not run); no real tool pauses yet ·
@@ -56,6 +57,7 @@ redesign) · #9 real Claude + token counts in trace · #15 output guard
 |---|---|
 | Change a graph step | `backend/simba/nodes/<step>.py`, wiring in `graph.py`, fields in `state.py`, `docs/contracts.md` |
 | Prompts / personality | `backend/simba/prompts/system.md` (the agent); `summary.md` (chat summaries, #82) |
+| Skills | `backend/simba/skills/` (files + loader), `tools/skill_tools.py`, agent `skills_block`; contracts § 7.5c |
 | Hook points (model/tool) | `harness/settings.py`, `harness/hooks.py`, `harness/tool_hooks.py`, `nodes/hook_points.py` |
 | Web search | `backend/simba/tools/web_search.py` (Tavily, requires optional `TAVILY_API_KEY`) |
 | Tool permissions | `backend/simba/tools/registry.py` (manifest + registry), each tool file's `MANIFEST`, `docs/contracts.md` § 7.5b; approval pause: `nodes/approval.py`, `approval_rule`, api.py `resume` (§ 7.9) |

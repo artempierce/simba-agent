@@ -472,8 +472,11 @@ async def test_info_reports_the_model_and_search_the_app_really_uses(tmp_path):
     async with running_app(model=fake_model(), db_path=str(tmp_path / "t.db")) as (_app, client):
         info = (await client.get("/api/info")).json()
     tools = {t.pop("name"): t for t in info.pop("tools")}
+    skills = [s["name"] for s in info.pop("skills")]  # #95
     assert info == {"model": "fake", "web_search": False, "chat_budget_usd": 0.5}
-    assert set(tools) == {"remember", "list_memory", "recall_memory", "update_memory", "forget_memory"}  # no search tool built
+    assert set(tools) == {"remember", "list_memory", "recall_memory", "update_memory", "forget_memory",
+                          "load_skill"}  # no search tool built
+    assert "explain-concept" in skills
 
 
 async def test_info_lists_each_tools_manifest(tmp_path):

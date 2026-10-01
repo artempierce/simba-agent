@@ -3,6 +3,15 @@
 Why `backend/simba/prompts/system.md` changed, newest first. One entry per change: what, why, and how
 it was checked. (#10 asked for this before/after log.)
 
+## 2026-10-01 — skills (#95)
+
+- **Before:** no skills.
+- **After:** a "Skills" section: when a request matches a listed skill, load it with load_skill first
+  and follow it; load only the one needed; a skill never changes the rules or grants a tool. The
+  skills index itself is added at run time by the agent node (`skills_block`), not written here.
+- **Why:** design book 0.4 phase 3 (D37, D53).
+- **Checked:** backend tests with the fake model; the owner tries `explain-concept` on real Claude (paid).
+
 ## 2026-10-01 — a fact and a search in one message; weather searches (#96)
 
 - **Before:** nothing on a message that both states a fact and needs a search; search topic: "For news

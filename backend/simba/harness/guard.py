@@ -128,7 +128,9 @@ INJECTION_RULES: dict[str, re.Pattern[str]] = {
     # one way to match and the check is linear again (see the timing test in tests/test_guard.py).
     # #80: "memory" is the fence around saved facts in the agent's prompt (agent.profile_block); a user
     # typing <memory>…</memory> could otherwise pass off made-up "saved facts" as the real block.
-    "fake-tags": re.compile(r"<\s*(?:/\s*)?(system|assistant|untrusted_retrieval|user_message|memory)\b[^>]*>", re.IGNORECASE),
+    # #95: "skill" is the fence load_skill puts around a skill's body; a typed <skill>…</skill> could
+    # otherwise pass off the user's own text as one of Simba's reviewed procedures.
+    "fake-tags": re.compile(r"<\s*(?:/\s*)?(system|assistant|untrusted_retrieval|user_message|memory|skill)\b[^>]*>", re.IGNORECASE),
 }
 
 

@@ -104,6 +104,7 @@ def build_graph(
     load_profile: Callable[[], Awaitable[dict[str, list[str]]]] | None = None,
     memory_tools: list[BaseTool] | None = None,
     summarize: Callable | None = None,
+    skill_tools: list[BaseTool] | None = None,
 ) -> CompiledStateGraph:
     """Build and compile Simba's graph.
 
@@ -124,6 +125,8 @@ def build_graph(
             before_tool checks. None means no memory tools.
         summarize: the summarize node (#82, nodes/summarize.py) that keeps each chat's rolling
             summary; it runs after after_model. None (tests, no memory) ends the turn at after_model.
+        skill_tools: load_skill (#95, tools/skill_tools.py); it joins the same tool loop and checks.
+            None means no skills (and no skills index in the prompt).
 
     Returns: a compiled graph, ready for `.astream(...)` / `.ainvoke(...)`.
 
@@ -144,7 +147,7 @@ def build_graph(
     graph = StateGraph(ChatState)
     # 1. Nodes.
     graph.add_node("before_model", make_before_model(classifier))
-    all_tools = ([web_search_tool] if web_search_tool is not None else []) + list(memory_tools or [])
+    all_tools = ([web_search_tool] if web_search_tool is not None else []) + list(memory_tools or []) + list(skill_tools or [])
     # 1b. #65: the registry loads each tool's manifest. Only declared, enabled tools are offered to the
     #     model and given to ToolNode; before_tool still checks every call against the manifest, so a
     #     tool the model names without being offered is denied in code too.

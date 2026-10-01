@@ -160,7 +160,7 @@
       <h1>Simba Design Book</h1>
       <div class="meta">
         <span class="pill">0.4 approved</span>
-        <span>Version 0.4 · memory added 30 Sep 2026</span>
+        <span>Version 0.4 · memory added 30 Sep, skills 1 Oct 2026</span>
         <span>Repo <code>/Users/sol/simba-agent</code></span>
       </div>
     </header>
@@ -462,6 +462,8 @@ flowchart TD
         <div class="box layer"><h4>Tool</h4><p>Python code plus its manifest, behind <code>before_tool</code> and <code>after_tool</code>.</p></div>
         <div class="box layer"><h4>MCP connection</h4><p>An outside service. Last, and switched off until you turn it on.</p></div>
       </div>
+      <h3>How a skill works (built in #95)</h3>
+      <p>A skill is one file, <code>backend/simba/skills/&lt;name&gt;.md</code>: a <code>name</code> and a one-line <code>description</code> at the top, then the procedure. Simba's prompt lists only the names and descriptions; when a request matches one, the model calls <code>load_skill(name)</code> and reads the full procedure, which shows in the trace as <code>skill · &lt;name&gt;</code>. This keeps the prompt small however many skills there are, the same way Claude Code loads its skills. A skill is text only: it can't switch on a tool or grant a permission, and for now only a reviewed PR adds one (D53). The first skill is <code>explain-concept</code>: one plain definition, one small example, then an offer to go deeper.</p>
       <p class="note">These follow the self-improvement rules in <code>CLAUDE.md</code>: propose, never apply; show the whole change; least privilege; generated code is untrusted; reversible; Simba cannot loosen its own limits.</p>
     </section>
 
@@ -499,7 +501,7 @@ flowchart TD
       <div class="table-wrap"><table>
         <thead><tr><th>Kind</th><th>What it holds</th><th>Written</th><th>Read</th><th>Ticket</th></tr></thead>
         <tbody>
-          <tr><td>Procedural</td><td class="wrap">How Simba behaves: <code>system.md</code>; later, skills</td><td class="wrap">By a reviewed PR only</td><td class="wrap">Every turn</td><td class="wrap">done</td></tr>
+          <tr><td>Procedural</td><td class="wrap">How Simba behaves: <code>system.md</code>, plus skills loaded when a task needs one (#95)</td><td class="wrap">By a reviewed PR only</td><td class="wrap">Every turn</td><td class="wrap">done</td></tr>
           <tr><td>Short-term</td><td class="wrap">This chat's last 20 messages</td><td class="wrap">Every turn (checkpointer)</td><td class="wrap">Every turn</td><td class="wrap">done</td></tr>
           <tr><td>Procedural (learned)</td><td class="wrap"><code>feedback</code> facts: corrections and confirmed ways of working, with the why</td><td class="wrap">By talking (D46)</td><td class="wrap">Every turn, ≤ 15 (D48)</td><td class="wrap">#87</td></tr>
           <tr><td>Semantic</td><td class="wrap">Facts: <code>user</code> (who you are, preferences), <code>project</code> (ongoing work, dates), <code>reference</code> (pointers)</td><td class="wrap">By talking: <code>remember</code> saves on its own (D40); <code>update_memory</code> and <code>forget_memory</code> when you ask (D46, D47)</td><td class="wrap">Profile (≤ 15 <code>user</code> facts) every turn (D43); the rest via <code>list_memory</code> / <code>recall_memory</code></td><td class="wrap">#80, #81, #87</td></tr>
@@ -682,7 +684,7 @@ Safety
           <tr><td>E · Evals</td><td class="wrap">Search eval (#54) and safety eval (#58), baselines recorded</td><td><span class="chip done">done</span></td></tr>
           <tr><td>0.4 · Phase 1</td><td class="wrap">Measure and harden: search prompt (#55), Sonnet 5.5 chosen by the evals (#62), input normalisation (#63), safety-eval follow-ups (#64)</td><td><span class="chip next">next</span></td></tr>
           <tr><td>0.4 · Phase 2</td><td class="wrap">Tool registry and permission manifests (#65); approval pause and the untrusted-content rule (#66); <code>forget_memory</code> is the first tool on the approve / deny card (D51)</td><td><span class="chip done">done</span></td></tr>
-          <tr><td>0.4 · Phase 3</td><td class="wrap">Skills: Simba loads markdown skills; you add them by hand at first</td><td><span class="chip later">later</span></td></tr>
+          <tr><td>0.4 · Phase 3</td><td class="wrap">Skills: Simba loads markdown skills; you add them by hand at first (#95, D53)</td><td><span class="chip done">done</span></td></tr>
           <tr><td>0.4 · Phase 4</td><td class="wrap">Proposals: Simba writes one in chat, an approval card appears in the UI (#30)</td><td><span class="chip later">later</span></td></tr>
           <tr><td>0.4 · Phase 5</td><td class="wrap">Developer agent turns an approved proposal into a PR (#30)</td><td><span class="chip later">later</span></td></tr>
           <tr><td>Memory</td><td class="wrap">Facts and profile (#80), <code>remember</code> (#81), rolling summaries (#82), hybrid recall (#83); moved ahead of phases 2–5</td><td><span class="chip next">next</span></td></tr>
@@ -747,6 +749,7 @@ Safety
           <tr><td>D50</td><td class="wrap">Recall without an embedding model, like Claude Code's memory: an index of recent chats with short ids in the prompt, <code>recall_memory(chat=…)</code> to open one, <code>recall_memory(query=…)</code> keyword search (SQLite FTS5)</td><td class="wrap">Sol, 30 Sep, #83</td></tr>
           <tr><td>D51</td><td class="wrap">Which writes get an approval card: <code>remember</code> / <code>update_memory</code> (undoable, code limits) don't; <code>forget_memory</code> (can't be undone) always does (replaces D47). After web results every write still waits; memory writes stay blocked (that part replaced by D52)</td><td class="wrap">Sol, 30 Sep, #66</td></tr>
           <tr><td>D52</td><td class="wrap">A memory save after web results waits for your approval card instead of being blocked; the own-words and no-secrets checks still run first; forgetting after web results stays blocked (replaces that part of D51)</td><td class="wrap">Sol, 1 Oct, #96</td></tr>
+          <tr><td>D53</td><td class="wrap">Skills are markdown files with a name and a one-line description, added only by a reviewed PR; the prompt lists them and <code>load_skill</code> reads one when needed; a skill can't grant tools or permissions</td><td class="wrap">Sol, 1 Oct, #95</td></tr>
         </tbody>
       </table></div>
     </section>

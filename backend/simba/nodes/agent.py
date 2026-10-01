@@ -30,6 +30,7 @@ from langchain_core.tools import BaseTool
 from simba.common import emit_trace, neutralise_tag, recent, text_of, tokens_used
 from simba.prompts import load
 from simba.schemas import ReportUnsafe
+from simba.skills import Skill, list_skills
 from simba.state import ChatState
 from simba.tools.registry import ToolRegistry
 
@@ -91,6 +92,22 @@ def profile_block(profile: dict[str, list[str]]) -> str:
     )
 
 
+def skills_block(skills: list[Skill]) -> str:
+    """The skills index for the system prompt (#95, D53): one line per skill, name and description.
+
+    Only the index goes in, never the bodies: the model calls load_skill for the one it needs, so the
+    prompt stays small however many skills exist. Skills are Simba's own reviewed files, so this is
+    instruction text, not fenced data. No skills -> "" (the prompt stays exactly as before).
+
+    Example: skills_block([Skill("explain-concept", "Explain an idea", "...")]) ->
+        "\n\nSkills (load one with load_skill when a task matches it, then follow it):\n- explain-concept: Explain an idea"
+    """
+    if not skills:
+        return ""
+    lines = "\n".join(f"- {skill.name}: {skill.description}" for skill in skills)
+    return f"\n\nSkills (load one with load_skill when a task matches it, then follow it):\n{lines}"
+
+
 def make_node(
     model: BaseChatModel,
     tools: Sequence[BaseTool] = (),
@@ -119,6 +136,8 @@ def make_node(
       5. #96: a reply with no text and no tool call becomes EMPTY_REPLY_TEXT, so the owner is never
          left with an empty answer.
 
+    Step 1 also adds the skills index (#95, `skills_block`) when load_skill is among the tools.
+
     Step 1 also adds the always-loaded memory (#80, #87): `load_profile()` returns the newest `user`
     and `feedback` facts (memory.MemoryStore.core_profile), read fresh every turn so a change counts at
     once. None (tests, or no memory) means no profile.
@@ -141,6 +160,9 @@ def make_node(
         # 1b. The core profile from memory, fenced as data (see profile_block).
         profile = await load_profile() if load_profile is not None else {}
         system_text += profile_block(profile)
+        # 1c. #95: the skills index, only when load_skill is offered (read fresh, like system.md).
+        if any(tool.name == "load_skill" for tool in tools):
+            system_text += skills_block(list_skills())
         loaded = sum(len(facts) for facts in profile.values())
         memory_note = f" · memory {loaded}" if loaded else ""
         prompt = [SystemMessage(system_text), *recent(state["messages"], HISTORY_LIMIT)]

@@ -61,7 +61,9 @@ from simba.harness.output_guard import RETRACT_TEXT
 from simba.harness.settings import CHAT_BUDGET_USD
 from simba.model import cost_usd, make_model, model_name
 from simba.nodes.summarize import make_summarize_node
+from simba.skills import list_skills
 from simba.tools.memory_tools import make_memory_tools
+from simba.tools.skill_tools import make_skill_tools
 from simba.tools.registry import ToolRegistry
 from simba.tools.web_search import make_web_search_tool
 
@@ -157,12 +159,13 @@ def create_app(
                 app.state.memory = memory
                 graph_options = {"web_search_tool": resolved_web_search_tool} if resolved_web_search_tool else {}
                 memory_tools = make_memory_tools(memory)
+                skill_tools = make_skill_tools()  # #95
                 # #65: the same manifests the graph's before_tool checks, for GET /api/info.
                 app.state.tool_registry = ToolRegistry.from_tools(
-                    ([resolved_web_search_tool] if resolved_web_search_tool else []) + memory_tools)
+                    ([resolved_web_search_tool] if resolved_web_search_tool else []) + memory_tools + skill_tools)
                 app.state.graph = build_graph(chat_model, checkpointer, resolved_classifier,
                                               load_profile=memory.core_profile,
-                                              memory_tools=memory_tools,
+                                              memory_tools=memory_tools, skill_tools=skill_tools,
                                               summarize=make_summarize_node(chat_model, memory), **graph_options)
                 yield
             finally:
@@ -181,7 +184,8 @@ def create_app(
     @app.get("/api/info")
     async def info():
         """What this server is running with, for the header pill (#57): the model's name ("fake" for
-        the free fake model), whether web search is on, and the per-chat budget.
+        the free fake model), whether web search is on, the per-chat budget, the tools with their
+        manifests (#65) and the skills Simba can load (#95).
 
         Why read it from the objects create_app built, not from environment variables: the pill must
         show what Simba will *really* use. A key typed into .env after the server started, for
@@ -192,6 +196,7 @@ def create_app(
             "web_search": resolved_web_search_tool is not None,
             "chat_budget_usd": CHAT_BUDGET_USD,
             "tools": app.state.tool_registry.describe(),
+            "skills": [{"name": s.name, "description": s.description} for s in list_skills()],  # #95
         }
 
     @app.post("/api/chat")
