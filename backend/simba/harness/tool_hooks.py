@@ -161,6 +161,38 @@ def memory_from_owner(serialized_call: str) -> HookResult:
     return HookResult("allow", None, "fact is from the owner")
 
 
+# #66: the rule name approval_rule flags with; before_tool (nodes/hook_points.py) looks for it.
+NEEDS_APPROVAL = "needs-approval"
+
+
+def approval_rule(serialized_call: str) -> HookResult:
+    """Decide whether a call must wait for the owner's approval (#66, D35). Runs last, so a call
+    another hook blocked never gets this far.
+
+    A call needs approval when:
+    1. its manifest says `needs_approval`, or
+    2. it is a `write` tool and this turn has already read untrusted content (web results): a page
+       must never be able to trigger a change on its own, whatever the manifest says.
+    The answer is a "flag" with rule NEEDS_APPROVAL, not a block: the call is valid, it just waits.
+    Memory writes after web results never reach rule 2 — memory_from_owner blocks them outright.
+
+    Example: {"manifest": {"access": "write", ...}, "turn_read_untrusted": true} -> flag
+    "write after web results"; the same call with turn_read_untrusted false -> allow.
+    """
+    try:
+        call = json.loads(serialized_call)
+        manifest = call.get("manifest") or {}
+    except (AttributeError, TypeError, json.JSONDecodeError):
+        return HookResult("block", "approval-format", "tool call was malformed")
+    # 1.
+    if manifest.get("needs_approval"):
+        return HookResult("flag", NEEDS_APPROVAL, "waits for approval")
+    # 2.
+    if manifest.get("access") == "write" and call.get("turn_read_untrusted"):
+        return HookResult("flag", NEEDS_APPROVAL, "write after web results waits for approval")
+    return HookResult("allow", None, "")
+
+
 def flag_instruction_like_tool_result(text: str) -> HookResult:
     """Flag search results containing known injection phrasing without treating them as instructions."""
     rule = find_injection(text)

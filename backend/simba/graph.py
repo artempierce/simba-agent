@@ -16,6 +16,7 @@ next node by name — read that result and choose the path:
                 local classifier — code + one local model call, $0 (#32, was "guard")
   agent         LLM: answers, calls report_unsafe, or requests web_search (#17, #33)       nodes/agent.py
   before_tool   hooks (settings.py's BEFORE_TOOL): manifest check (#65), query, budget (#17) nodes/hook_points.py
+  approval      pauses (interrupt) until the owner approves or declines held calls (#66)    nodes/approval.py
   tools         runs allowlisted web_search; its after_tool hooks run inside it (#17)       langgraph ToolNode
   after_model   hooks (harness/settings.py's AFTER_MODEL): checks on the finished reply;    nodes/hook_points.py
                 retracts leaks, $0 (#15, #32, was "output_guard")
@@ -38,6 +39,7 @@ from langgraph.prebuilt import ToolNode
 
 from simba.harness.classifier import InjectionClassifier
 from simba.nodes import agent as agent_node
+from simba.nodes.approval import approval
 from simba.nodes.hook_points import after_model, make_before_model, make_before_tool
 from simba.nodes.refuse import refuse
 from simba.state import ChatState
@@ -67,7 +69,7 @@ def make_after_before_tool(search_limit: int | None):
 
     def after_before_tool(state: ChatState) -> str:
         """Routing function for the edge after `before_tool`: "tools" for calls that passed validation,
-        "agent" for a rejected call (the model reads the denial and tries something else), or "refuse"
+        "approval" when some of them must wait for the owner (#66), "agent" for a rejected call (the model reads the denial and tries something else), or "refuse"
         once a rejected call has also run past the turn's search budget.
 
         Why the third route: the budget hook only blocks the *search*. Sending that denial back to the
@@ -79,12 +81,19 @@ def make_after_before_tool(search_limit: int | None):
         4th anyway, before_tool denies it, `web_search_calls` becomes 4 > 3 -> "refuse".
         """
         if not state["tool_call_blocked"]:
-            return "tools"
+            # #66: a valid batch with a held call waits for the owner first.
+            return "approval" if state.get("approval_calls") else "tools"
         if search_limit is not None and state["web_search_calls"] > search_limit:
             return "refuse"
         return "agent"
 
     return after_before_tool
+
+
+def after_approval(state: ChatState) -> str:
+    """Routing function after the approval node (#66): "tools" when the owner approved, "agent" when
+    they declined (the model reads the denial and answers without the action)."""
+    return "agent" if state["tool_call_blocked"] else "tools"
 
 
 def build_graph(
@@ -127,7 +136,8 @@ def build_graph(
       3. After `before_model`, `after_before_model` picks `agent` or `refuse` (a conditional edge).
       4. After `agent`, `after_agent` picks `after_model`, `refuse`, or `before_tool`.
       5. `before_tool` validates requested calls; `after_before_tool` picks `tools`, `agent`
-         (a denied call) or `refuse` (denied past the search budget).
+         (a denied call), `refuse` (denied past the search budget) or `approval` (#66: a held call
+         pauses for the owner; `after_approval` then picks `tools` or `agent`).
       6. A completed tool result loops back to `agent` — the ReAct loop.
       7. Both `after_model` and `refuse` end the turn (refuse's fixed text needs no checking).
     """
@@ -146,6 +156,7 @@ def build_graph(
     if tools:
         graph.add_node("tools", ToolNode(tools))
         graph.add_node("before_tool", make_before_tool(registry))
+        graph.add_node("approval", approval)
     # 2. Every turn starts with the before_model hooks.
     graph.add_edge(START, "before_model")
     # 3. The list names every node `after_before_model` may return, so LangGraph can draw and check the graph.
@@ -156,7 +167,9 @@ def build_graph(
     if tools:
         # 5. Validate before anything runs.
         after_before_tool = make_after_before_tool(registry.max_calls("web_search"))
-        graph.add_conditional_edges("before_tool", after_before_tool, ["tools", "agent", "refuse"])
+        graph.add_conditional_edges("before_tool", after_before_tool, ["tools", "approval", "agent", "refuse"])
+        # 5b. #66: held calls pause here until the owner answers (interrupt + checkpointer).
+        graph.add_conditional_edges("approval", after_approval, ["tools", "agent"])
         # 6. The tool's result goes back to the agent.
         graph.add_edge("tools", "agent")
     # 7. Both terminal paths end the turn.

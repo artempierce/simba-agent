@@ -47,6 +47,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_core.tools import BaseTool
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.types import Command
 from pydantic import BaseModel
 
 from simba.chats import ChatStore, title_from
@@ -81,6 +82,12 @@ class ChatRequest(BaseModel):
 
     message: str
     chat_id: str | None = None
+
+
+class ResumeRequest(BaseModel):
+    """The JSON body of POST /api/chat/{id}/resume (#66): the owner's answer on the approval card."""
+
+    approve: bool
 
 
 def sse(event: str, data: dict) -> str:
@@ -189,7 +196,32 @@ def create_app(
 
     @app.post("/api/chat")
     async def chat(req: ChatRequest):
-        """Run one turn of the graph and stream everything that happens back as SSE.
+        """POST /api/chat: run one new turn (see `run_turn`)."""
+        return await run_turn(req)
+
+    @app.post("/api/chat/{chat_id}/resume")
+    async def resume(chat_id: str, body: ResumeRequest):
+        """POST /api/chat/{id}/resume (#66): the owner answered an approval card; continue the paused
+        turn with LangGraph's `Command(resume=...)` and stream the rest of it, exactly like a turn.
+
+        404 for an unknown chat; 409 when the chat has no paused turn (already answered, or never
+        paused) — checked here, before streaming, so a double click can't run a tool twice.
+        """
+        if await app.state.chats.get(chat_id) is None:
+            raise HTTPException(status_code=404, detail="chat not found")
+        if not await paused_calls(chat_id):
+            raise HTTPException(status_code=409, detail="nothing is waiting for approval")
+        return await run_turn(ChatRequest(message="", chat_id=chat_id), {"approve": body.approve})
+
+    async def paused_calls(chat_id: str) -> dict | None:
+        """The approval node's waiting value ({"calls": [...]}) if this chat's turn is paused, else None.
+        LangGraph keeps a pending `interrupt()` on the checkpointed state's tasks."""
+        state = await app.state.graph.aget_state({"configurable": {"thread_id": chat_id}})
+        return next((i.value for task in state.tasks for i in task.interrupts), None)
+
+    async def run_turn(req: ChatRequest, resume_with: dict | None = None):
+        """Run one turn of the graph — or, with `resume_with`, the rest of a paused one (#66) — and
+        stream everything that happens back as SSE.
 
         Steps (contracts.md § 9):
           1. Find or create the chat's sidebar row: no chat_id → a new chat titled from this first
@@ -199,11 +231,15 @@ def create_app(
              2b. Budget (#16): if this chat has already spent CHAT_BUDGET_USD, don't run the graph at
                  all — send one `budget` trace line and an `error` asking for a new chat, save the
                  run, and stop. Checked in code before any model call, so it can't be talked past.
-          3. Reset this turn's input exactly to contracts.md § 4's shape (history itself is kept
+                 A resume skips this: it finishes a turn that already started.
+          3. Reset this turn's input (a resume sends `Command(resume=resume_with)` instead) exactly to contracts.md § 4's shape (history itself is kept
              by the checkpointer, keyed by chat_id) and run the graph, forwarding `custom`
              chunks as `trace` and `messages` chunks as `token` (only the agent node's actual
              answer text — a `report_unsafe` call streams as tool-call chunks, not text the user
              should see).
+             3b. #66: if the graph stopped at the approval node, send an `approval · waiting` trace
+                 line and an `approval` event with the held calls, save the run, send `done`, and
+                 stop. The page shows the card; its answer comes back through `resume`.
           4. If nothing became a `token` (e.g. the refuse node's fixed reply never goes through the
              model, so it never streams as a "messages" chunk), fall back to the newest message: if it's this
              turn's AI reply (`type == "ai"` — the human message went in first, so an AI message
@@ -218,6 +254,8 @@ def create_app(
              4's own state lookup — becomes an `error` event instead of the stream just stopping.
           6. Save the turn's run (prompt, trace lines, totals or error) with the chat, so opening
              this chat later shows its trace panel again. Saved on every ending: done or error.
+             A resume adds its lines to the paused turn's run instead (`extend_last_run`): one
+             turn keeps one run, which is how the page pairs runs with messages.
           7. If the stream is cut off before step 6 (the browser disconnected), save the run anyway,
              marked as interrupted — so a reopened chat never shows a message without its trace.
              (Rare edge case: if the cancellation instead lands while the ASGI server's own `send()`
@@ -232,6 +270,10 @@ def create_app(
         if req.chat_id is None:
             chat = await chats.create(title_from(req.message))
         elif (chat := await chats.get(req.chat_id)) is not None:
+            # 1b. #66: a paused turn must be answered first. A new message on top would leave the
+            #     held tool call without a result, which the model API rejects.
+            if resume_with is None and await paused_calls(chat["id"]):
+                raise HTTPException(status_code=409, detail="answer the approval card first")
             await chats.touch(chat["id"])
         else:
             raise HTTPException(status_code=404, detail="chat not found")
@@ -248,7 +290,10 @@ def create_app(
                 """6. Store this turn's trace block with the chat (see chats.ChatStore.add_run)."""
                 nonlocal saved
                 saved = True
-                await chats.add_run(chat_id, req.message, lines, summary, error)
+                if resume_with is not None:
+                    await chats.extend_last_run(chat_id, lines, summary, error)
+                else:
+                    await chats.add_run(chat_id, req.message, lines, summary, error)
 
             try:
                 async for event in stream_turn(lines, save_run):
@@ -264,10 +309,10 @@ def create_app(
                 #    generator is closed by garbage collection, which is rare and not deterministic.)
                 if not saved:
                     with anyio.CancelScope(shield=True):
-                        await chats.add_run(chat_id, req.message, lines, None, "interrupted before the reply finished")
+                        await save_run(None, "interrupted before the reply finished")
 
         async def stream_turn(lines: list[dict], save_run):
-            """Steps 2–6 for one turn, yielding SSE strings (see `chat`'s docstring)."""
+            """Steps 2–6 for one turn, yielding SSE strings (see `run_turn`'s docstring)."""
             started = time.perf_counter()
             # 2. Send `start` first, always, before anything below can fail.
             yield sse("start", {"chat_id": chat_id, "title": chat["title"]})
@@ -275,7 +320,7 @@ def create_app(
             # 2b. Refuse the turn if the chat is out of budget. The trace line is built here, not
             #     with common.emit_trace, because no graph node is running to stream it.
             spent = await chats.spent_usd(chat_id)
-            if spent >= CHAT_BUDGET_USD:
+            if resume_with is None and spent >= CHAT_BUDGET_USD:
                 message = f"This chat reached its ${CHAT_BUDGET_USD:.2f} budget. Please start a new chat."
                 line = {
                     "stage": "budget",
@@ -292,12 +337,13 @@ def create_app(
                 yield sse("error", {"message": message})
                 return
 
-            turn_input = {
+            turn_input = Command(resume=resume_with) if resume_with is not None else {
                 "messages": [HumanMessage(req.message)],
                 "verdict": None,
                 "flag": None,
                 "tool_call_blocked": None,
                 "web_search_calls": 0,
+                "approval_calls": None,
             }
             tokens_in = tokens_out = 0
             token_sent = False
@@ -328,6 +374,21 @@ def create_app(
                         message, metadata = chunk
                         if metadata.get("langgraph_node") == "agent" and (text := text_of(message)):
                             answer_chunks.append(text)
+
+                # 3b. #66: the graph stopped at the approval node. Nothing was answered yet; tell the
+                #     page what waits, keep the run, and end this stream. `resume` continues it.
+                if waiting := await paused_calls(chat_id):
+                    line = {"stage": "approval", "status": "flagged", "ms": ms_since(started),
+                            "detail": f"waiting · {', '.join(c['tool'] for c in waiting['calls'])}"[:80],
+                            "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0}
+                    lines.append(line)
+                    yield sse("trace", line)
+                    yield sse("approval", waiting)
+                    summary = {"input_tokens": tokens_in, "output_tokens": tokens_out,
+                               "cost_usd": cost_usd(tokens_in, tokens_out), "ms": ms_since(started)}
+                    await save_run(summary, None)
+                    yield sse("done", summary)
+                    return
 
                 # 4. Release model output only after its full answer passed after_model. The graph
                 #    has already replaced a blocked answer in saved state; don't expose its chunks.

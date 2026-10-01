@@ -44,6 +44,9 @@ class ChatState(TypedDict):
               tool call, then reset on the next request. Used to route rejected calls around ToolNode.
     web_search_calls number of search requests attempted during this turn; reset at each user turn
               and capped so one model loop cannot spend the search allowance indefinitely.
+    approval_calls the tool calls waiting for the owner's approval (#66), each {"id", "tool", "args",
+              "reason"}; None when nothing waits. Written by before_tool, cleared by the approval
+              node once the owner has answered.
     """
 
     messages: Annotated[list[AnyMessage], add_messages]
@@ -51,3 +54,4 @@ class ChatState(TypedDict):
     flag: str | None
     tool_call_blocked: bool | None
     web_search_calls: int
+    approval_calls: list[dict] | None
