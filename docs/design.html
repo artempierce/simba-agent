@@ -512,7 +512,7 @@ flowchart TD
       <p>There is no separate "should I save this?" step. In the same call where the agent answers, the prompt describes the four kinds and asks: will this still matter in a later chat, is it not obvious, and isn't it already known? If so, the agent calls <code>remember</code>; a similar fact is updated instead of added. This is how Claude Code keeps its own memory files.</p>
       <p><strong>Limits in code</strong>, because automatic memory is the classic way an attack survives into later chats:</p>
       <ul>
-        <li>Only facts from <em>your</em> words in this turn. A turn that read web results can't save anything (the untrusted-content rule, D35).</li>
+        <li>Only facts from <em>your</em> words in this turn. After a turn has read web results, a save waits for your approve on a card, and forgetting is blocked (the untrusted-content rule, D35, D52).</li>
         <li>Size cap per fact and in total; a near-duplicate updates the old fact.</li>
         <li>Every save shows in the trace and as <em>Remembered: … · Undo</em> under the reply.</li>
         <li>Memory text reaches the model inside a fenced block, as data, never as instructions (D45).</li>
