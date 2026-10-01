@@ -150,6 +150,38 @@ class ChatStore:
         )
         await self._db.commit()
 
+    async def extend_last_run(
+        self, chat_id: str, lines: list[dict], summary: dict | None, error: str | None
+    ) -> None:
+        """Add a resumed turn's lines to the chat's newest run (#66), so a turn that paused for approval
+        still has ONE run (the page pairs runs with user messages one-to-one).
+
+        1. Read the newest run's lines and summary.
+        2. Append the new lines; add the two summaries' totals together (tokens, cost, time) so the
+           run's summary covers the whole turn; keep the new error, if any.
+
+        Example: run [before_model, agent, before_tool, approval·waiting] + resumed [approval·approved,
+        send_note, agent, after_model] -> one run with all eight lines.
+        """
+        # 1.
+        cursor = await self._db.execute(
+            "SELECT id, lines, summary FROM runs WHERE chat_id = ? ORDER BY id DESC LIMIT 1", (chat_id,)
+        )
+        row = await cursor.fetchone()
+        if row is None:  # nothing to extend (not expected): keep the lines as their own run
+            await self.add_run(chat_id, "", lines, summary, error)
+            return
+        run_id, old_lines, old_summary = row
+        # 2.
+        before = json.loads(old_summary) if old_summary else None
+        if before and summary:
+            summary = {key: before.get(key, 0) + summary.get(key, 0) for key in summary}
+        await self._db.execute(
+            "UPDATE runs SET lines = ?, summary = ?, error = ? WHERE id = ?",
+            (json.dumps(json.loads(old_lines) + lines), json.dumps(summary) if summary is not None else None, error, run_id),
+        )
+        await self._db.commit()
+
     async def runs(self, chat_id: str) -> list[dict]:
         """A chat's runs, oldest first (the order a chat view replays them in), lines/summary decoded
         back from JSON so callers get plain Python values, matching the frontend's `Run` type."""

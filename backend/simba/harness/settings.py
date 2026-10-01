@@ -15,6 +15,7 @@ from simba.harness.hooks import Hook
 from simba.harness.output_guard import no_internal_tags, no_prompt_leak, no_secrets
 from simba.harness.tool_hooks import (
     allowlisted_tool_call,
+    approval_rule,
     flag_instruction_like_tool_result,
     memory_from_owner,
     valid_web_search_filters,
@@ -52,5 +53,6 @@ CHAT_BUDGET_USD = 0.50
 BEFORE_TOOL: list[Hook] = [
     allowlisted_tool_call, valid_web_search_query, valid_web_search_filters, within_web_search_budget,
     memory_from_owner,  # #81: remember's code limits
+    approval_rule,  # #66: last, so only a call every other hook allowed can be held for approval
 ]
 AFTER_TOOL: list[Hook] = [flag_instruction_like_tool_result]

@@ -70,9 +70,10 @@ class ChatState(TypedDict):
     flag: str | None           # #8: why the local classifier flagged this turn, e.g. "classifier 0.97"; None = not flagged
   tool_call_blocked: bool | None
   web_search_calls: int       # reset each user turn; at most 3 search requests are attempted
+  approval_calls: list[dict] | None  # #66: calls waiting for the owner, each {"id", "tool", "args", "reason"}
 ```
 
-Each turn's graph input resets `verdict`, `flag`, `tool_call_blocked`, and `web_search_calls` alongside `messages`.
+Each turn's graph input resets `verdict`, `flag`, `tool_call_blocked`, `web_search_calls` and `approval_calls` alongside `messages`.
 (resets the per-turn fields; history is kept by the checkpointer). #33 removed `intent` and
 `decision` — the agent node reasons about both inside its one model call.
 
@@ -90,7 +91,7 @@ Every node calls `emit_trace(stage, status, detail, start, tokens)` **exactly on
  "ms": 640, "input_tokens": 212, "output_tokens": 31, "cost_usd": 0.000367}
 ```
 
-`stage` ∈ `before_model | agent | before_tool | web_search | after_tool | remember | list_memory | recall_memory | update_memory | forget_memory | after_model | summarize | refuse | budget` (`budget` is sent by api.py, not a node — § 9; `intent`/`reason`/`generate` on chats saved
+`stage` ∈ `before_model | agent | before_tool | web_search | after_tool | remember | list_memory | recall_memory | update_memory | forget_memory | approval | after_model | summarize | refuse | budget` (`budget` and `approval · waiting` are sent by api.py, not a node — § 9; `intent`/`reason`/`generate` on chats saved
 before #33; `guard`/`output_guard` on chats saved before #32; `echo` existed in steps 1–4 only).
 `status` ∈ `ok | blocked | error | flagged` (`flagged` = passed, but a hook raised a flag — shown as ⚑
 in the trace panel, in the guard colour, not the error colour). Detail formats are given per node in
@@ -247,13 +248,27 @@ Every tool declares a frozen `ToolManifest` and attaches it with `declare(tool, 
 | `hosts` | network hosts the tool talks to | shown only |
 | `cost_per_call` | plain-words cost, e.g. `"1 Tavily credit"` | shown only |
 | `max_calls_per_turn` | per-turn call limit, `None` = none | yes (`within_web_search_budget`, agent binding, routing) |
-| `needs_approval` | owner must approve each call | not yet (#66) |
+| `needs_approval` | owner must approve each call | yes (`approval_rule` → approval node, § 7.9) |
 | `enabled` | default `False` | yes: a disabled tool is not offered to the model and is denied |
 
 `ToolRegistry.from_tools(tools)` collects the manifests. `build_graph` offers and runs only declared,
 enabled tools; `before_tool` puts the manifest (or `null`) in each call's hook payload and
 `allowlisted_tool_call` blocks a call with no manifest or a disabled one (`tool-not-allowed`). Its
 allow reason is the trace line `{name} · {access} · {no approval|needs approval}`.
+
+### § 7.9 Approval pause (`simba/nodes/approval.py`, #66, D35)
+
+- `approval_rule` (last `before_tool` hook) flags a valid call with rule `needs-approval` when its
+  manifest has `needs_approval`, or it is `access: "write"` and the turn has read web results. Memory
+  writes after web results never get here: `memory_from_owner` blocks them first.
+- `before_tool` lists flagged calls in `approval_calls`; `after_before_tool` then routes to `approval`.
+- The `approval` node calls `interrupt({"calls": approval_calls})`; the checkpointer holds the turn.
+  Resumed with `Command(resume={"approve": bool})`, it re-runs: only `approve is True` approves
+  (fail closed). Approve → `tools` runs the whole batch. Deny → a ToolMessage per call id
+  (`DECLINED_TEXT` for held calls, `NOT_RUN_TEXT` for siblings) → `agent`.
+- Trace: `approval · ok · approved · {tools}` or `approval · blocked · denied · {tools}` from the node;
+  `approval · flagged · waiting · {tools}` from api.py when the stream pauses (§ 9).
+- No real tool sets `needs_approval` yet; #66b gives `forget_memory` the approval card.
 
 ## § 8 Graph (`simba/graph.py`)
 
@@ -270,8 +285,9 @@ START → before_model ─┬─ pass ─→ agent ─┬─ text reply ─→ a
 (`output_guard` renamed `after_model` by #32; refuse's fixed text is not checked.)
 Routing functions `after_before_model(state) -> "agent" | "refuse"` and
 `after_agent(state) -> "after_model" | "refuse" | "before_tool"` reads the verdict and latest AI tool calls.
-`after_before_tool(state) -> "tools" | "agent" | "refuse"`: `tools` only after validation passes;
-a denied call goes back to `agent`, or to `refuse` once `web_search_calls > MAX_WEB_SEARCH_CALLS_PER_TURN`. Steps 1–4 used a
+`after_before_tool(state) -> "tools" | "approval" | "agent" | "refuse"`: `tools` only after validation passes
+(`approval` first when `approval_calls` is set, #66; `after_approval(state) -> "tools" | "agent"`);
+a denied call goes back to `agent`, or to `refuse` once `web_search_calls` passes web_search's `max_calls_per_turn`. Steps 1–4 used a
 placeholder `echo` node (replied `"You said: {text}"`); step 5 replaced it with `generate`; #32
 renamed `guard`/`output_guard` to `before_model`/`after_model` and moved their logic behind hooks;
 #33 merged `intent`/`reason`/`generate` into the single `agent` node above.
@@ -307,7 +323,16 @@ classifier as above, and stores `app.state.graph`, `app.state.checkpointer` (and
 | `error` | `{"message": str}` | an exception; then the stream ends |
 | `memory` | `{"action": "added"\|"updated"\|"forgotten", "fact_id", "kind", "text", "previous_text"}` | #81: the `remember` tool saved a fact; sent when it happens (not a trace line). Undo = DELETE an added fact, PATCH back `previous_text` for an updated one |
 | `replace` | `{"text": str}` | #15: `after_model` retracted the buffered answer; no unsafe answer chunks were sent. The page swaps the empty reply bubble for `text` just before `done` |
+| `approval` | `{"calls": [{"id", "tool", "args", "reason"}]}` | #66: the turn paused at the approval node. Sent after an `approval · waiting` trace line, then `done`; the run is saved |
 | `done` | `{"input_tokens", "output_tokens", "cost_usd", "ms"}` | last; totals summed from trace events |
+
+- `POST /api/chat` on a chat whose turn is paused → 409 (a new message would leave the held call
+  without a result).
+- `POST /api/chat/{chat_id}/resume`, body `{"approve": bool}` (#66) → the rest of the paused turn as
+  the same SSE stream (`start` … `done`), run with `Command(resume={"approve": approve})`. 404 for an
+  unknown chat, 409 when nothing is paused (so a second click can't run a tool twice). No budget
+  check. Its trace lines and totals are added to the paused turn's run (`ChatStore.extend_last_run`),
+  so one turn keeps one run.
 
 Chats (step 6): `chat_id: null` creates the chat row (title per § 10); a known id is touched (moves to
 the top); an **unknown id → 404 `{"detail": "chat not found"}`** before any SSE — client text never

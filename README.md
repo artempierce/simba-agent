@@ -83,15 +83,15 @@ uv run --group eval python -m evals.run_search_eval --cases t01,n04 --run     # 
 uv run --group eval python -m evals.run_search_eval --variant v1 --search replay --run   # compare a change
 ```
 
-**Safety eval** (#58): `evals/safety_cases.yaml` holds 33 cases built on the OWASP Top 10 for LLM apps —
+**Safety eval** (#58): `evals/safety_cases.yaml` holds 36 cases built on the OWASP Top 10 for LLM apps —
 direct and indirect prompt injection (the attack hidden in a search result), prompt extraction,
-harmful requests, secrets — plus 7 benign questions that only *sound* risky, so over-refusal counts
+harmful requests, secrets, a page asking for a memory change (#66, graded by `must_not_run`) — plus 7 benign questions that only *sound* risky, so over-refusal counts
 as a failure too. Search is scripted (free, repeatable). The summary shows the attack success rate,
 the over-refusal rate, and which guardrail caught each attack.
 
 ```bash
 uv run --group eval python -m evals.run_safety_eval --fake       # free dry run
-uv run --group eval python -m evals.run_safety_eval --run        # all 33 (paid)
+uv run --group eval python -m evals.run_safety_eval --run        # all 36 (paid)
 ```
 
 `--search record` (the default) saves Tavily's answers; `--search replay` reuses them, so two variants
@@ -158,7 +158,7 @@ simba-agent/
 │   │   ├── hooks.py          HookResult, Hook, and run_hooks (the hook runner)
 │   │   ├── tool_hooks.py     manifest check (undeclared/disabled = denied), query length, untrusted-result scan
 │   │   └── settings.py       which hooks run at each hook point, in which order
-│   ├── nodes/                one file per graph node: hook_points (before_model/after_model), agent, refuse
+│   ├── nodes/                one file per graph node: hook_points (before_model/after_model), agent, approval (#66 pause), refuse
 │   ├── tools/registry.py     ToolManifest (what a tool may do) and ToolRegistry (#65)
 │   ├── tools/web_search.py   optional Tavily client, capped/untrusted results
 │   ├── model.py              real Claude or the free fake model; cost per call

@@ -83,8 +83,8 @@
         },
         "responses": {
           "200": {
-            "description": "The turn as a stream of SSE blocks. Order: `start` (once, first) → `trace` (one per hook point/node) and `token` (answer chunks sent only after after_model approves the complete reply) → `replace` (only if after_model retracted the buffered answer) → `done` (once, last). On an exception after `start`, `error` replaces `done` and ends the stream.",
-            "x-sse-events": ["start", "trace", "token", "replace", "memory", "error", "done"],
+            "description": "The turn as a stream of SSE blocks. Order: `start` (once, first) → `trace` (one per hook point/node) and `token` (answer chunks sent only after after_model approves the complete reply) → `replace` (only if after_model retracted the buffered answer) → `done` (once, last). On an exception after `start`, `error` replaces `done` and ends the stream. If a tool call must wait for the owner (#66), the turn pauses instead of answering: an `approval` trace line, then an `approval` event, then `done`; POST /api/chat/{chat_id}/resume continues it.",
+            "x-sse-events": ["start", "trace", "token", "replace", "memory", "approval", "error", "done"],
             "content": {
               "text/event-stream": {
                 "schema": { "$ref": "#/components/schemas/SseEvent" },
@@ -93,6 +93,30 @@
             }
           },
           "404": { "$ref": "#/components/responses/ChatNotFound" },
+          "409": { "description": "This chat has a turn paused for approval; answer it (resume) before sending a new message." },
+          "422": { "$ref": "#/components/responses/ValidationError" }
+        }
+      }
+    },
+    "/api/chat/{chat_id}/resume": {
+      "parameters": [ { "name": "chat_id", "in": "path", "required": true, "schema": { "type": "string" } } ],
+      "post": {
+        "tags": ["chat"],
+        "operationId": "resumeChat",
+        "summary": "Answer an approval card; stream the rest of the paused turn (#66)",
+        "description": "Continues a turn that paused at the approval node, with LangGraph's Command(resume={approve}). Approve runs the held tool calls; deny answers them with a denial the model reads. Only `approve: true` approves. The resumed lines are added to the paused turn's saved run, so one turn keeps one run.",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ResumeRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "The rest of the turn as SSE, same events and order as POST /api/chat (no budget check: the turn already started).",
+            "x-sse-events": ["start", "trace", "token", "replace", "memory", "approval", "error", "done"],
+            "content": { "text/event-stream": { "schema": { "$ref": "#/components/schemas/SseEvent" } } }
+          },
+          "404": { "$ref": "#/components/responses/ChatNotFound" },
+          "409": { "description": "Nothing in this chat is waiting for approval (already answered, or never paused)." },
           "422": { "$ref": "#/components/responses/ValidationError" }
         }
       }
@@ -321,7 +345,7 @@
       "TraceStage": {
         "type": "string",
         "description": "Which graph node or tool hook wrote the line (contracts.md § 6). `guard`/`output_guard` are saved before #32 (the hooks redesign); new tool turns may also write `before_tool`, `web_search`, and `after_tool`.",
-        "enum": ["before_model", "agent", "before_tool", "web_search", "after_tool", "after_model", "refuse", "intent", "reason", "generate", "guard", "output_guard"]
+        "enum": ["before_model", "agent", "before_tool", "web_search", "after_tool", "approval", "after_model", "refuse", "intent", "reason", "generate", "guard", "output_guard"]
       },
       "TraceStatus": {
         "type": "string",
@@ -361,6 +385,7 @@
           { "$ref": "#/components/schemas/TokenEvent" },
           { "$ref": "#/components/schemas/ReplaceEvent" },
           { "$ref": "#/components/schemas/MemoryEvent" },
+          { "$ref": "#/components/schemas/ApprovalEvent" },
           { "$ref": "#/components/schemas/ErrorEvent" },
           { "$ref": "#/components/schemas/DoneEvent" }
         ],
@@ -378,6 +403,39 @@
             "properties": { "chat_id": { "type": "string" }, "title": { "type": "string" } }
           }
         }
+      },
+      "ApprovalEvent": {
+        "type": "object",
+        "description": "#66: the turn paused because these tool calls need the owner's approval. Followed by `done`; answer with POST /api/chat/{chat_id}/resume.",
+        "required": ["event", "data"],
+        "properties": {
+          "event": { "const": "approval" },
+          "data": {
+            "type": "object",
+            "required": ["calls"],
+            "properties": {
+              "calls": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["id", "tool", "args", "reason"],
+                  "properties": {
+                    "id": { "type": "string" },
+                    "tool": { "type": "string", "examples": ["forget_memory"] },
+                    "args": { "type": "object" },
+                    "reason": { "type": "string", "examples": ["waits for approval", "write after web results waits for approval"] }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ResumeRequest": {
+        "type": "object",
+        "description": "The body of POST /api/chat/{chat_id}/resume.",
+        "required": ["approve"],
+        "properties": { "approve": { "type": "boolean" } }
       },
       "TraceEvent": {
         "type": "object",

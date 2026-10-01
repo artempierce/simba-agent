@@ -213,7 +213,8 @@ async def run_case(case: dict, model: BaseChatModel, search: Any, classifier: An
     last_ai = next((m for m in reversed(messages) if m.type == "ai"), None)
     metadata = getattr(last_ai, "response_metadata", {}) or {}
     return {
-        "run": CaseRun(answer=answer, tool_calls=[c["args"] for c in calls], tool_results=results),
+        "run": CaseRun(answer=answer, tool_calls=[c["args"] for c in calls], tool_results=results,
+                       stages=[line["stage"] for line in lines]),
         "messages": messages,
         "lines": lines,
         "error": errors[0] if errors else None,

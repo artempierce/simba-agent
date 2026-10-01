@@ -23,7 +23,7 @@ from simba.harness.classifier import InjectionClassifier
 from simba.harness.hooks import run_hooks
 from simba.harness.output_guard import RETRACT_TEXT
 from simba.harness.settings import AFTER_MODEL, BEFORE_TOOL, before_model_hooks
-from simba.harness.tool_hooks import USER_TEXT_MESSAGES
+from simba.harness.tool_hooks import NEEDS_APPROVAL, USER_TEXT_MESSAGES
 from simba.state import ChatState
 from simba.tools.registry import ToolRegistry
 
@@ -111,7 +111,8 @@ def make_before_tool(registry: ToolRegistry):
 
         An invalid, undeclared or disabled call gets a ToolMessage explaining the denial and a state
         flag that routes straight back to the agent, never through ToolNode. Valid calls are left
-        untouched for dispatch.
+        untouched for dispatch — except that calls approval_rule flagged (#66) are listed in
+        `approval_calls`, which routes the batch through the approval node (nodes/approval.py) first.
 
         Each call's hook payload also carries (#81, #65):
           calls_used           searches made so far this turn — only web_search calls count
@@ -123,6 +124,7 @@ def make_before_tool(registry: ToolRegistry):
         calls_used = state["web_search_calls"]
         turn_read_untrusted, user_text = _turn_context(state["messages"])
         rejected: dict[str, str] = {}
+        waiting: list[dict] = []  # #66: valid calls that must wait for the owner's approval
         searches = 0
         for call in assistant_message.tool_calls:
             manifest = registry.manifest(call["name"])
@@ -137,6 +139,8 @@ def make_before_tool(registry: ToolRegistry):
             blocked = next((result for result in hook_results if result.action == "block"), None)
             if blocked is not None:
                 rejected[call["id"]] = blocked.reason
+            elif held := next((r for r in hook_results if r.rule == NEEDS_APPROVAL), None):
+                waiting.append({"id": call["id"], "tool": call["name"], "args": call["args"], "reason": held.reason})
 
         if rejected:
             # Reject the whole batch and answer every call id, so valid siblings aren't left without
@@ -156,11 +160,13 @@ def make_before_tool(registry: ToolRegistry):
             return {
                 "tool_call_blocked": True,
                 "web_search_calls": calls_used + searches,
+                "approval_calls": None,
                 "messages": tool_messages,
             }
         return {
             "tool_call_blocked": False,
             "web_search_calls": calls_used + searches,
+            "approval_calls": waiting or None,
         }
 
     return before_tool

@@ -47,11 +47,13 @@ class CaseRun:
     answer        the reply text the user saw
     tool_calls    the args of each web_search call, in order, e.g. {"query": ..., "topic": "news"}
     tool_results  the raw text of each search result as the model received it
+    stages        the trace lines' stages, in order — a tool appears here only if it actually ran (#66)
     """
 
     answer: str
     tool_calls: list[dict] = field(default_factory=list)
     tool_results: list[str] = field(default_factory=list)
+    stages: list[str] = field(default_factory=list)
 
 
 def normalise_url(url: str) -> str:
