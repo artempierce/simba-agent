@@ -2,7 +2,8 @@
 tool_hooks.py — validation and injection checks run around every tool call (#17, #81).
 
 Each before_tool hook gets one call as JSON: {"name", "args", "calls_used", "turn_read_untrusted",
-"user_text"}. A hook that doesn't apply to a call's tool allows it with an empty reason, so the trace
+"user_text", "manifest"} — `manifest` is the tool's permission manifest as a dict, or null when the
+tool was never declared (#65). A hook that doesn't apply to a call's tool allows it with an empty reason, so the trace
 line only lists the checks that really ran (hooks.py skips empty reasons).
 
 Where it sits: `settings.py` lists these hooks, and `simba/tools/web_search.py` runs them before
@@ -25,9 +26,6 @@ MAX_WEB_SEARCH_QUERY_CHARS = 500
 TOPICS = ("general", "news")
 TIME_RANGES = ("day", "week", "month", "year")
 
-# #81, #87: the tools the model may call. Everything else is denied before it can run.
-ALLOWED_TOOLS = ("web_search", "remember", "list_memory", "recall_memory", "update_memory", "forget_memory")
-
 # #87: the memory tools that change memory, and which argument holds the new text (None: no text).
 MEMORY_WRITES = {"remember": "fact", "update_memory": "text", "forget_memory": None}
 
@@ -38,19 +36,25 @@ MEMORY_WRITES = {"remember": "fact", "update_memory": "text", "forget_memory": N
 OWN_WORDS_OVERLAP = 0.5
 USER_TEXT_MESSAGES = 6
 
-# A single answer can use several searches, but cannot loop indefinitely against a metered provider.
-MAX_WEB_SEARCH_CALLS_PER_TURN = 3
-
 
 def allowlisted_tool_call(serialized_call: str) -> HookResult:
-    """Allow only the explicitly supported read-only tool and reject malformed call data."""
+    """Allow only a tool whose manifest is declared and enabled (#65, D34); reject malformed call data.
+
+    The payload's `manifest` is what the registry holds for the called tool (nodes/hook_points.py puts
+    it there), or None when nobody declared the tool. Undeclared or disabled -> blocked, in code.
+    The allow reason is the manifest summary, so the trace line shows what the tool may do.
+    """
     try:
         call = json.loads(serialized_call)
     except (TypeError, json.JSONDecodeError):
         return HookResult("block", "tool-call-format", "tool call arguments were malformed")
-    if not isinstance(call, dict) or call.get("name") not in ALLOWED_TOOLS:
-        return HookResult("block", "tool-not-allowed", "tool is not on the allowlist")
-    return HookResult("allow", None, f"{call['name']} is allowlisted")
+    if not isinstance(call, dict) or not isinstance(call.get("manifest"), dict):
+        return HookResult("block", "tool-not-allowed", "tool has no declared manifest")
+    manifest = call["manifest"]
+    if not manifest.get("enabled"):
+        return HookResult("block", "tool-not-allowed", "tool is switched off in its manifest")
+    approval = "needs approval" if manifest.get("needs_approval") else "no approval"
+    return HookResult("allow", None, f"{call.get('name')} · {manifest.get('access')} · {approval}")
 
 
 def _is_search(serialized_call: str) -> bool:
@@ -104,17 +108,19 @@ def valid_web_search_filters(serialized_call: str) -> HookResult:
 
 def within_web_search_budget(serialized_call: str) -> HookResult:
     """Block a search request after the turn's deterministic call allowance is used. Only searches
-    count (#81): saving a fact never uses up the search budget."""
+    count (#81): saving a fact never uses up the search budget. The allowance is the manifest's
+    `max_calls_per_turn` (#65); a search whose manifest sets no limit fails closed."""
     if not _is_search(serialized_call):
         return HookResult("allow", None, "")
     try:
         call = json.loads(serialized_call)
         calls_used = call.get("calls_used", 0) if isinstance(call, dict) else None
-    except (TypeError, json.JSONDecodeError):
-        calls_used = None
-    if not isinstance(calls_used, int) or calls_used < 0:
-        return HookResult("block", "web-search-budget", "search call count is invalid")
-    if calls_used >= MAX_WEB_SEARCH_CALLS_PER_TURN:
+        limit = (call.get("manifest") or {}).get("max_calls_per_turn")
+    except (AttributeError, TypeError, json.JSONDecodeError):
+        calls_used = limit = None
+    if not isinstance(calls_used, int) or calls_used < 0 or not isinstance(limit, int):
+        return HookResult("block", "web-search-budget", "search call count or limit is invalid")
+    if calls_used >= limit:
         return HookResult("block", "web-search-budget", "per-turn search limit reached")
     return HookResult("allow", None, "search call is within the per-turn limit")
 

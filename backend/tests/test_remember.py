@@ -8,21 +8,30 @@ The fake model asks for `remember` when a test dictates it (model.fake_model `st
 """
 
 import json
+from dataclasses import asdict
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from simba.harness.tool_hooks import memory_from_owner, within_web_search_budget
 from simba.memory import MemoryStore
 from simba.model import fake_model
-from simba.nodes.hook_points import before_tool
+from simba.nodes.hook_points import make_before_tool
+from simba.tools.memory_tools import WRITE_MANIFEST
+from simba.tools.registry import ToolRegistry
+from simba.tools.web_search import MANIFEST as SEARCH_MANIFEST
 from tests.node_harness import run_node
 from tests.test_api import parse_sse, running_app
 
+# The before_tool node as the graph builds it (#65), with the two tools these tests call declared.
+before_tool = make_before_tool(ToolRegistry({"web_search": SEARCH_MANIFEST, "remember": WRITE_MANIFEST}))
+
 
 def call(name: str, args: dict, **context) -> str:
-    """A before_tool hook payload, as hook_points.before_tool builds it."""
+    """A before_tool hook payload, as hook_points.make_before_tool builds it (web_search carries its
+    manifest, so its per-turn limit applies)."""
+    manifest = {"manifest": asdict(SEARCH_MANIFEST)} if name == "web_search" else {}
     return json.dumps({"name": name, "args": args, "calls_used": 0, "turn_read_untrusted": False,
-                       "user_text": "", **context})
+                       "user_text": "", **manifest, **context})
 
 
 # ---- the store: one fact, not copies ----

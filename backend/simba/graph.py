@@ -15,7 +15,7 @@ next node by name — read that result and choose the path:
   before_model  hooks (harness/settings.py's before_model_hooks): size, injection regex,   nodes/hook_points.py
                 local classifier — code + one local model call, $0 (#32, was "guard")
   agent         LLM: answers, calls report_unsafe, or requests web_search (#17, #33)       nodes/agent.py
-  before_tool   hooks (settings.py's BEFORE_TOOL): allowlist, query, per-turn budget (#17)  nodes/hook_points.py
+  before_tool   hooks (settings.py's BEFORE_TOOL): manifest check (#65), query, budget (#17) nodes/hook_points.py
   tools         runs allowlisted web_search; its after_tool hooks run inside it (#17)       langgraph ToolNode
   after_model   hooks (harness/settings.py's AFTER_MODEL): checks on the finished reply;    nodes/hook_points.py
                 retracts leaks, $0 (#15, #32, was "output_guard")
@@ -37,11 +37,11 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
 from simba.harness.classifier import InjectionClassifier
-from simba.harness.tool_hooks import MAX_WEB_SEARCH_CALLS_PER_TURN
 from simba.nodes import agent as agent_node
-from simba.nodes.hook_points import after_model, before_tool, make_before_model
+from simba.nodes.hook_points import after_model, make_before_model, make_before_tool
 from simba.nodes.refuse import refuse
 from simba.state import ChatState
+from simba.tools.registry import ToolRegistry
 
 
 def after_before_model(state: ChatState) -> str:
@@ -60,24 +60,31 @@ def after_agent(state: ChatState) -> str:
     return "after_model"
 
 
-def after_before_tool(state: ChatState) -> str:
-    """Routing function for the edge after `before_tool`: "tools" for calls that passed validation,
-    "agent" for a rejected call (the model reads the denial and tries something else), or "refuse"
-    once a rejected call has also run past the turn's search budget.
+def make_after_before_tool(search_limit: int | None):
+    """Build the routing function for the edge after `before_tool`, bound to web_search's per-turn
+    limit (its manifest's `max_calls_per_turn`, #65; None = no limit). A factory because a routing
+    function only receives `state`, and the limit now comes from the registry, not a constant."""
 
-    Why the third route: the budget hook only blocks the *search*. Sending that denial back to the
-    agent would let a model that keeps asking loop forever, one paid model call per round. The agent
-    stops offering the tool once the budget is spent (nodes/agent.py), so only a misbehaving model
-    lands here — and its turn ends with the fixed refusal. Hard limit in code, not a prompt.
+    def after_before_tool(state: ChatState) -> str:
+        """Routing function for the edge after `before_tool`: "tools" for calls that passed validation,
+        "agent" for a rejected call (the model reads the denial and tries something else), or "refuse"
+        once a rejected call has also run past the turn's search budget.
 
-    Example (budget 3): searches 1-3 run -> the agent answers with no tool bound. If it requests a
-    4th anyway, before_tool denies it, `web_search_calls` becomes 4 > 3 -> "refuse".
-    """
-    if not state["tool_call_blocked"]:
-        return "tools"
-    if state["web_search_calls"] > MAX_WEB_SEARCH_CALLS_PER_TURN:
-        return "refuse"
-    return "agent"
+        Why the third route: the budget hook only blocks the *search*. Sending that denial back to the
+        agent would let a model that keeps asking loop forever, one paid model call per round. The agent
+        stops offering the tool once the budget is spent (nodes/agent.py), so only a misbehaving model
+        lands here — and its turn ends with the fixed refusal. Hard limit in code, not a prompt.
+
+        Example (budget 3): searches 1-3 run -> the agent answers with no tool bound. If it requests a
+        4th anyway, before_tool denies it, `web_search_calls` becomes 4 > 3 -> "refuse".
+        """
+        if not state["tool_call_blocked"]:
+            return "tools"
+        if search_limit is not None and state["web_search_calls"] > search_limit:
+            return "refuse"
+        return "agent"
+
+    return after_before_tool
 
 
 def build_graph(
@@ -112,7 +119,8 @@ def build_graph(
     Returns: a compiled graph, ready for `.astream(...)` / `.ainvoke(...)`.
 
     Steps:
-      1. Register the nodes by name. `agent` is built by its `make_node(model, tools)` factory;
+      1. Register the nodes by name (1b: build the tool registry from the tools' manifests, #65).
+         `agent` is built by its `make_node(model, tools, ...)` factory;
          `before_model` by its own `make_before_model(classifier)` factory (#8, #32). The tool
          nodes exist only when a search tool is configured.
       2. START always goes to `before_model`.
@@ -126,13 +134,18 @@ def build_graph(
     graph = StateGraph(ChatState)
     # 1. Nodes.
     graph.add_node("before_model", make_before_model(classifier))
-    tools = ([web_search_tool] if web_search_tool is not None else []) + list(memory_tools or [])
-    graph.add_node("agent", agent_node.make_node(model, tools, load_profile))
+    all_tools = ([web_search_tool] if web_search_tool is not None else []) + list(memory_tools or [])
+    # 1b. #65: the registry loads each tool's manifest. Only declared, enabled tools are offered to the
+    #     model and given to ToolNode; before_tool still checks every call against the manifest, so a
+    #     tool the model names without being offered is denied in code too.
+    registry = ToolRegistry.from_tools(all_tools)
+    tools = [t for t in all_tools if (m := registry.manifest(t.name)) and m.enabled]
+    graph.add_node("agent", agent_node.make_node(model, tools, load_profile, registry))
     graph.add_node("after_model", after_model)
     graph.add_node("refuse", refuse)
     if tools:
         graph.add_node("tools", ToolNode(tools))
-        graph.add_node("before_tool", before_tool)
+        graph.add_node("before_tool", make_before_tool(registry))
     # 2. Every turn starts with the before_model hooks.
     graph.add_edge(START, "before_model")
     # 3. The list names every node `after_before_model` may return, so LangGraph can draw and check the graph.
@@ -142,6 +155,7 @@ def build_graph(
     graph.add_conditional_edges("agent", after_agent, destinations)
     if tools:
         # 5. Validate before anything runs.
+        after_before_tool = make_after_before_tool(registry.max_calls("web_search"))
         graph.add_conditional_edges("before_tool", after_before_tool, ["tools", "agent", "refuse"])
         # 6. The tool's result goes back to the agent.
         graph.add_edge("tools", "agent")

@@ -31,6 +31,13 @@ from langgraph.prebuilt import InjectedState
 
 from simba.common import emit_trace, neutralise_tag, text_of
 from simba.memory import MemoryFull, MemoryStore, is_clear_yes
+from simba.tools.registry import ToolManifest, declare
+
+# #65: what the memory tools may do. Local only (no network hosts, no cost). The write tools change
+# memory but are guarded by code limits (harness/tool_hooks.py's memory_from_owner) and Undo, so they
+# need no approval card (D51, #66); forget_memory gets its card in #66.
+READ_MANIFEST = ToolManifest(access="read", enabled=True)
+WRITE_MANIFEST = ToolManifest(access="write", enabled=True)
 
 # Trace details are shown in a narrow panel column (docs/contracts.md § 6): keep them short.
 MAX_TRACE_DETAIL_CHARS = 80
@@ -196,5 +203,9 @@ def make_memory_tools(store: MemoryStore) -> list[BaseTool]:
                 "Only a clear yes in their next message lets you delete; then call forget_memory again "
                 "with the same arguments.")
 
-    return [remember, list_memory, recall_memory, update_memory, forget_memory]
+    return [
+        declare(remember, WRITE_MANIFEST), declare(list_memory, READ_MANIFEST),
+        declare(recall_memory, READ_MANIFEST), declare(update_memory, WRITE_MANIFEST),
+        declare(forget_memory, WRITE_MANIFEST),
+    ]
 

@@ -21,11 +21,19 @@ from langchain_core.tools import BaseTool, tool
 from simba.common import emit_trace, neutralise_tag
 from simba.harness.hooks import run_hooks
 from simba.harness.settings import AFTER_TOOL
+from simba.tools.registry import ToolManifest, declare
 
 # A small result window keeps web content useful without letting a page flood the model context.
 MAX_TOOL_RESULT_CHARS = 8_000
 MAX_RESULTS = 5
 logger = logging.getLogger(__name__)
+
+# #65: what web_search may do. Read-only, one host, 3 searches per turn: one answer may use a few
+# searches, but a model that keeps asking can't loop against a metered provider.
+MANIFEST = ToolManifest(
+    access="read", hosts=("api.tavily.com",), cost_per_call="1 Tavily credit",
+    max_calls_per_turn=3, enabled=True,
+)
 
 # Trace details are shown in a narrow panel column (docs/contracts.md § 6): keep them short.
 MAX_TRACE_DETAIL_CHARS = 80
@@ -122,4 +130,4 @@ def make_web_search_tool(search_client: SearchClient | None = None) -> BaseTool 
         suffix = "\n[Search results truncated.]" if was_truncated else ""
         return f"<untrusted_tool_result>\n{safe_text}{suffix}{warning}\n</untrusted_tool_result>"
 
-    return web_search
+    return declare(web_search, MANIFEST)

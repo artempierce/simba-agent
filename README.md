@@ -156,9 +156,10 @@ simba-agent/
 │   │   ├── classifier.py     the local prompt-injection model + classifier_hook, flags (⚑) messages
 │   │   ├── output_guard.py   after_model hooks: secrets, internal tags, prompt leaks
 │   │   ├── hooks.py          HookResult, Hook, and run_hooks (the hook runner)
-│   │   ├── tool_hooks.py     allowlist, query length, and untrusted-result scan
+│   │   ├── tool_hooks.py     manifest check (undeclared/disabled = denied), query length, untrusted-result scan
 │   │   └── settings.py       which hooks run at each hook point, in which order
 │   ├── nodes/                one file per graph node: hook_points (before_model/after_model), agent, refuse
+│   ├── tools/registry.py     ToolManifest (what a tool may do) and ToolRegistry (#65)
 │   ├── tools/web_search.py   optional Tavily client, capped/untrusted results
 │   ├── model.py              real Claude or the free fake model; cost per call
 │   ├── state.py              the graph's state
