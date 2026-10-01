@@ -11,7 +11,8 @@ import Markdown from 'react-markdown'
 import { Fish, Paw, Whiskers, Yarn, DoodleBand } from './Doodles'
 import { SimbaAvatar } from './SimbaAvatar'
 import { moodFor, type Mood } from '../mood'
-import type { MemoryEvent, Message, RememberedFact, Run } from '../types'
+import { ApprovalCard } from './ApprovalCard'
+import type { ApprovalRequest, Fact, MemoryEvent, Message, RememberedFact, Run } from '../types'
 import type { ComponentType } from 'react'
 
 type Props = {
@@ -21,6 +22,9 @@ type Props = {
   mood: Mood // Simba's current mood, for the empty state's avatar
   onSend: (text: string) => void // called with the trimmed message to send
   onUndoMemory: (event: MemoryEvent) => void // #81: Undo was clicked under a "Remembered" note
+  approval?: ApprovalRequest | null // #66: calls waiting for your approve / deny; null = nothing waits
+  facts?: Fact[] // saved facts, so the approval card can name what forget_memory would delete
+  onAnswerApproval?: (approve: boolean) => void // #66: Approve or Deny was clicked on the card
 }
 
 /**
@@ -30,21 +34,33 @@ type Props = {
  * 1. Show the greeting, or the message bubbles.
  * 2. Keep an empty marker after the last bubble, scrolled into view whenever messages change, so the
  *    newest text (including tokens streaming in) is always visible.
- * 3. The composer: Enter sends, Shift+Enter inserts a newline, read-only while an answer is streaming.
+ * 3. The composer: Enter sends, Shift+Enter inserts a newline, read-only while an answer is streaming
+ *    or a card waits (#66: the backend refuses a new message until the paused turn is answered).
  */
-export function ChatView({ messages, runs, busy, mood, onSend, onUndoMemory }: Props) {
+export function ChatView({
+  messages,
+  runs,
+  busy,
+  mood,
+  onSend,
+  onUndoMemory,
+  approval = null,
+  facts = [],
+  onAnswerApproval = () => {},
+}: Props) {
   const [draft, setDraft] = useState('')
+  const locked = busy || approval !== null // no sending while streaming or while a card waits
   const endRef = useRef<HTMLDivElement>(null)
   const runOf = runForEachMessage(messages, runs) // runOf[i] = the run of message i's turn (replies only)
 
   // 2.
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' })
-  }, [messages])
+  }, [messages, approval])
 
   /** Send the draft unless it's empty or an answer is still streaming; then clear the box. */
   function submit(text: string) {
-    if (!text || busy) return
+    if (!text || locked) return
     setDraft('')
     onSend(text)
   }
@@ -66,6 +82,11 @@ export function ChatView({ messages, runs, busy, mood, onSend, onUndoMemory }: P
               const avatarMood = moodFor(runOf[i], waiting, waiting && !!m.content)
               return <Bubble key={i} message={m} waiting={waiting} avatarMood={avatarMood} onUndoMemory={onUndoMemory} />
             })
+          )}
+          {/* #66: the card waits under the reply it belongs to. Keyed by the first call's id, so a
+              new pause gets fresh (unlocked) buttons. */}
+          {approval && (
+            <ApprovalCard key={approval.calls[0]?.id} request={approval} facts={facts} onAnswer={onAnswerApproval} />
           )}
           <div ref={endRef} />
         </div>
@@ -95,8 +116,8 @@ export function ChatView({ messages, runs, busy, mood, onSend, onUndoMemory }: P
             // browser blurs it the moment a send starts — you'd have to click back in to keep
             // typing. `readOnly` blocks edits without dropping focus; `submit()` already refuses to
             // send while busy, and aria-disabled tells assistive tech the field isn't accepting input.
-            readOnly={busy}
-            aria-disabled={busy}
+            readOnly={locked}
+            aria-disabled={locked}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               // Enter sends; Shift+Enter adds a new line. isComposing is true mid-way through an
@@ -108,11 +129,11 @@ export function ChatView({ messages, runs, busy, mood, onSend, onUndoMemory }: P
             }}
             placeholder="Ask Simba…"
             // field-sizing-content: the box grows with its text, up to max-h-48, then scrolls.
-            className={`field-sizing-content max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 outline-none placeholder:text-muted ${busy ? 'opacity-60' : ''}`}
+            className={`field-sizing-content max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2 py-2 outline-none placeholder:text-muted ${locked ? 'opacity-60' : ''}`}
           />
           <button
             type="submit"
-            disabled={busy || !draft.trim()}
+            disabled={locked || !draft.trim()}
             className="rounded-full bg-accent px-4 py-2 font-medium text-accent-ink hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:opacity-40"
           >
             Send
@@ -223,7 +244,7 @@ function Bubble({
  * offers an action that no longer applies.
  */
 function MemoryNote({ fact, onUndo }: { fact: RememberedFact; onUndo: () => void }) {
-  // A forgotten fact is gone after your own "yes": nothing to undo, just say it happened (#87).
+  // A forgotten fact is gone after you approved it on the card (#66b): nothing to undo, just say so.
   if (fact.action === 'forgotten') {
     return (
       <p className="mt-1 text-xs text-muted">

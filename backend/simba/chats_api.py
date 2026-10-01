@@ -95,6 +95,8 @@ async def get_chat(chat_id: str, request: Request) -> dict:
        not this store); a chat with no turns yet has no saved state, so default to no messages.
     3. Keep only human/ai messages, renamed to the roles the frontend's Message type uses.
     4. Attach the chat's runs (trace history) from the ChatStore.
+    5. #66b: attach `approval` — the calls a paused turn is waiting on ({"calls": [...]}), or None —
+       so a reopened chat shows its approval card again.
     """
     # 1. Look up the chat, 404 if the id is unknown.
     chat = await _get_or_404(request, chat_id)
@@ -109,7 +111,9 @@ async def get_chat(chat_id: str, request: Request) -> dict:
     ]
     # 4. Attach the chat's runs (trace history) from the ChatStore.
     runs = await request.app.state.chats.runs(chat_id)
-    return {"chat": chat, "messages": messages, "runs": runs}
+    # 5. #66b: a turn paused for approval keeps its card after a reload: the waiting calls, or None.
+    approval = next((i.value for task in state.tasks for i in task.interrupts), None)
+    return {"chat": chat, "messages": messages, "runs": runs, "approval": approval}
 
 
 @router.patch("/{chat_id}")

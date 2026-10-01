@@ -22,7 +22,7 @@
  * recently asked to open) and `chatsSeqRef` (which chats-list-changing call was the latest one).
  */
 import { useEffect, useRef, useState } from 'react'
-import { streamChat } from './api'
+import { streamChat, streamResume, type ChatHandlers } from './api'
 import { deleteChat, getChat, getInfo, listChats, renameChat } from './chatsApi'
 import { ChatView } from './components/ChatView'
 import { InfoPill } from './components/InfoPill'
@@ -33,7 +33,7 @@ import { SimbaAvatar } from './components/SimbaAvatar'
 import { TracePanel } from './components/TracePanel'
 import { deleteFact, listFacts, listSummaries, updateFact } from './memoryApi'
 import { moodFor } from './mood'
-import type { Chat, ChatSummary, Fact, MemoryEvent, Message, Run, ServerInfo } from './types'
+import type { ApprovalRequest, Chat, ChatSummary, Fact, MemoryEvent, Message, Run, ServerInfo } from './types'
 
 export default function App() {
   const [chatId, setChatId] = useState<string | null>(null) // null = a new, unsaved chat
@@ -47,6 +47,7 @@ export default function App() {
   const [view, setView] = useState<'chat' | 'memory'>('chat') // header tabs: the chat, or the Memory page (#87)
   const [facts, setFacts] = useState<Fact[]>([]) // what the Memory page shows (#80, #87)
   const [summaries, setSummaries] = useState<ChatSummary[]>([]) // the Memory page's Past chats (#82)
+  const [approval, setApproval] = useState<ApprovalRequest | null>(null) // #66: the open chat's waiting card
 
   // See the file header comment: these mirror state for async handlers to re-check after an await.
   const busyRef = useRef(false)
@@ -189,6 +190,7 @@ export default function App() {
     setBusyState(true)
     // 3.
     await streamChat(text, chatId, {
+      ...turnHandlers(),
       onStart: (id, title) => {
         setChatIdBoth(id)
         if (wasNewChat) {
@@ -196,12 +198,31 @@ export default function App() {
           setChats((cs) => [{ id, title, created_at: now, updated_at: now }, ...cs])
         }
       },
+    })
+    // 4.
+    setBusyState(false)
+    // 5.
+    await refreshChats()
+  }
+
+  /**
+   * The SSE handlers a turn's stream fills the newest reply bubble and trace run with. Shared by
+   * `send` and `answerApproval` (#66): a resumed turn carries on in the same bubble and run.
+   */
+  function turnHandlers(): ChatHandlers {
+    return {
+      onStart: () => {},
       onTrace: (line) => updateLastRun((r) => ({ ...r, lines: [...r.lines, line] })),
       onToken: (t) => updateReply((m) => ({ ...m, content: m.content + t })),
       // Retracted by the output guard (#15): replace, don't append — the streamed text must go.
       onReplace: (t) => updateReply((m) => ({ ...m, content: t })),
       // #81: a fact this reply saved; ChatView shows it under the reply with an Undo.
       onMemory: (event) => updateReply((m) => ({ ...m, memories: [...(m.memories ?? []), event] })),
+      // #66: the turn paused. Show the card; load the facts so it can name what forget would delete.
+      onApproval: (request) => {
+        setApproval(request)
+        void refreshFacts()
+      },
       onError: (message) => {
         // The trace panel is hidden below 1024px (lg), so an error must also reach the reply
         // bubble itself, or it would be invisible on narrow screens.
@@ -209,10 +230,21 @@ export default function App() {
         updateReply((m) => ({ ...m, error: message }))
       },
       onDone: (summary) => updateLastRun((r) => ({ ...r, summary })),
-    })
-    // 4.
+    }
+  }
+
+  /**
+   * Approve or Deny on the card (#66): hide the card, then stream the rest of the paused turn into
+   * the same reply bubble and trace run (POST /api/chat/{id}/resume). A newer `approval` event (the
+   * resumed turn paused again) brings a new card.
+   */
+  async function answerApproval(approve: boolean) {
+    const id = chatIdRef.current
+    if (id === null || busyRef.current) return
+    setApproval(null)
+    setBusyState(true)
+    await streamResume(id, approve, turnHandlers())
     setBusyState(false)
-    // 5.
     await refreshChats()
   }
 
@@ -225,6 +257,7 @@ export default function App() {
     setChatIdBoth(null)
     setMessages([])
     setRuns([])
+    setApproval(null)
     setDrawerOpen(false)
   }
 
@@ -240,11 +273,14 @@ export default function App() {
     if (busyRef.current) return
     requestedChatRef.current = id
     try {
-      const { chat, messages: loaded, runs: loadedRuns } = await getChat(id)
+      const { chat, messages: loaded, runs: loadedRuns, approval: waiting } = await getChat(id)
       if (busyRef.current || requestedChatRef.current !== id) return
       setChatIdBoth(chat.id)
       setMessages(loaded)
       setRuns(loadedRuns)
+      // #66b: a paused turn keeps its card after a reload or a chat switch.
+      setApproval(waiting ?? null)
+      if (waiting) void refreshFacts()
       setDrawerOpen(false)
     } catch (e) {
       if (busyRef.current || requestedChatRef.current !== id) return
@@ -367,7 +403,17 @@ export default function App() {
           )}
           <div className="min-h-0 flex-1">
             {view === 'chat' ? (
-              <ChatView messages={messages} runs={runs} busy={busy} mood={mood} onSend={send} onUndoMemory={undoMemory} />
+              <ChatView
+                messages={messages}
+                runs={runs}
+                busy={busy}
+                mood={mood}
+                onSend={send}
+                onUndoMemory={undoMemory}
+                approval={approval}
+                facts={facts}
+                onAnswerApproval={answerApproval}
+              />
             ) : (
               <MemoryPage facts={facts} summaries={summaries} chats={chats} onOpenChat={openChatFromMemory} />
             )}

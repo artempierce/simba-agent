@@ -268,7 +268,9 @@ allow reason is the trace line `{name} · {access} · {no approval|needs approva
   (`DECLINED_TEXT` for held calls, `NOT_RUN_TEXT` for siblings) → `agent`.
 - Trace: `approval · ok · approved · {tools}` or `approval · blocked · denied · {tools}` from the node;
   `approval · flagged · waiting · {tools}` from api.py when the stream pauses (§ 9).
-- No real tool sets `needs_approval` yet; #66b gives `forget_memory` the approval card.
+- `forget_memory` is the first real tool with `needs_approval` (#66b, D51). The page shows the card
+  (`ApprovalCard.tsx`, § 11) from the `approval` event or GET /api/chats/{id}'s `approval`, locks the
+  composer while it waits, and answers with POST /api/chat/{id}/resume.
 
 ## § 8 Graph (`simba/graph.py`)
 
@@ -383,7 +385,7 @@ Router `router = APIRouter(prefix="/api/chats")`, using `request.app.state.chats
 |---|---|---|---|
 | GET | `/api/chats` | – | `[chat]` |
 | POST | `/api/chats` | `{"title": str?}` | `chat` (201) |
-| GET | `/api/chats/{id}` | – | `{"chat": chat, "messages": [{"role": "user" \| "assistant", "content": str}], "runs": [run]}` |
+| GET | `/api/chats/{id}` | – | `{"chat": chat, "messages": [{"role": "user" \| "assistant", "content": str}], "runs": [run], "approval": {"calls": [...]} \| null}` (`approval`, #66b: a paused turn's waiting calls) |
 | PATCH | `/api/chats/{id}` | `{"title": str}` (1–80 chars after trim) | `chat` |
 | DELETE | `/api/chats/{id}` | – | 204; also `await checkpointer.adelete_thread(id)` |
 
@@ -415,8 +417,8 @@ TEXT, created_at TEXT, updated_at TEXT)`. `KINDS = ("user", "feedback", "project
 No add or delete-all route (#87, D46): memory is changed by talking, through the memory tools.
 `core_profile() -> {"user": [...], "feedback": [...]}` (≤ `CORE_PROFILE_LIMIT` each, `ALWAYS_LOADED`);
 the agent's `profile_block(profile)` renders one `<memory>` block with a heading per kind.
-`memory_pending(chat_id PK, target TEXT json ids | "all", human_turn INTEGER)`: `set_pending`,
-`get_pending`, `clear_pending`; `delete_facts(ids) -> [deleted facts]`; `is_clear_yes(text)`.
+`delete_facts(ids) -> [deleted facts]`. (#66b removed the `memory_pending` table — dropped on open —
+and `is_clear_yes`: the approval card replaced the next-message yes, D51.)
 
 **Recall (#83, D50)** — FTS5 table `memory_search(source UNINDEXED "fact"|"chat", ref UNINDEXED, text)`, kept in
 step by triggers on `memory_facts` (text = `kind: text why`) and `chat_summaries` (text = summary), rebuilt at
@@ -443,10 +445,9 @@ Guards: `<memory>` is an internal tag — `fake-tags` blocks it in input, `no_in
 **Memory tools (#81, #87, `simba/tools/memory_tools.py`)** — `make_memory_tools(store) -> [remember, list_memory,
 update_memory, forget_memory]`. `list_memory(kind?)` returns `<memory>` lines `[id] kind: text (why: …)`.
 `update_memory(fact_id, text, why?)` rewrites one fact (SSE `memory` `updated` with `previous_text`).
-`forget_memory(fact_ids? | everything)` (+ injected state): deletes only if this chat's pending request has
-the same target, was parked on the previous owner message (`human_turn - 1`) and the newest owner message
-`is_clear_yes`; otherwise it parks the request and tells the agent to ask (SSE `memory` `forgotten` per
-deleted fact). `remember`: args `kind`, `fact`,
+`forget_memory(fact_ids? | everything)`: its manifest has `needs_approval`, so every call pauses at the
+approval node (§ 7.9) and runs only after the owner approves the card; then it deletes (SSE `memory`
+`forgotten` per deleted fact, trace `forgot {n} fact(s)`). D51. `remember`: args `kind`, `fact`,
 `why?` (+ injected run config: `thread_id` becomes `source_chat_id`). Calls `MemoryStore.remember(kind,
 text, why, source_chat_id) -> (fact, "added" | "updated", previous_text)`: a same-kind fact whose
 `key_words` overlap ≥ `DUPLICATE_OVERLAP` (0.6) is updated instead of adding a copy. Emits trace
@@ -491,6 +492,10 @@ intent/reason/generate for chats saved before #33 and guard/output_guard for cha
 "Delete this chat? Yes / Cancel"; never `window.confirm`); `MobileDrawer.tsx` shows the Sidebar as an
 overlay below 768px. Escape rule: whoever handles an Escape press calls `preventDefault()`, so an
 outer layer (the drawer) only reacts to Escapes nobody inside handled.
+`ApprovalCard.tsx` (#66b): props `{request, facts, onAnswer(approve)}`; shown by ChatView under the
+messages while `approval` is set; each call in words via `approval.ts`'s `describeCall` (forget_memory
+names the facts' text); Approve / Deny lock after one click. `api.ts`'s `streamResume(chatId, approve,
+handlers)` streams the rest of the turn into the same reply bubble and run.
 
 Layout: sidebar left (≥ 768px; a menu button below), chat centre, trace right (≥ 1024px).
 

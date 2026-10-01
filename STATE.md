@@ -9,9 +9,8 @@ Harness redesign done (design book 0.3): hooks listed in `harness/settings.py` r
 (#32); one `agent` node replaces intent/reason/generate (#33).
 
 ## Current focus
-Design book 0.4 (safe growth, #67). Phase 2: #66 split in two (owner, 1 Oct) — #66a backend pause
-done; #66b next: approval card in the UI, `forget_memory` moves to the card, D51, e2e (starts after
-#66a merges). Phase 1 leftover: #62 Sonnet by evals.
+Design book 0.4 (safe growth, #67). Phase 2 done (#65, #66). Next: phase 3 skills (needs a plan);
+phase 1 leftover: #62 Sonnet by evals. Design book needs a republish once #66b is merged.
 
 ## Next up (post-MVP)
 - #30 Self-improvement (propose → approve → install), after the tool and approval design is ready
@@ -19,6 +18,7 @@ done; #66b next: approval card in the UI, `forget_memory` moves to the card, D51
 - #39 subagents (needs owner answers)
 
 ## Recently done
+#66b approve / deny card (`ApprovalCard.tsx`, resume via `streamResume`, card kept on reopen); `forget_memory` waits for the card (D51 replaces D47's next-message yes) ·
 #66a approval pause (backend): `approval_rule` hook, `approval` node with `interrupt()`, SSE `approval` + `POST /api/chat/{id}/resume`, safety cases w01–w03 (not run); no real tool pauses yet ·
 #65 tool manifests: each tool declares a `ToolManifest` (read/write, hosts, cost, per-turn limit, needs_approval, enabled); `tools/registry.py` loads them, undeclared or disabled tools are denied in `before_tool`, `/api/info` lists them ·
 #83 memory M4: `recall_memory` — open a chat by id, keyword search (FTS5); no embeddings (D50; vector design parked in #90) ·

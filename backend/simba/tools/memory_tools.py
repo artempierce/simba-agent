@@ -13,31 +13,32 @@ The five tools:
   recall_memory  find things by keyword across facts and chat summaries, or open one past chat's full
                  summary by the id the prompt's index shows (#83, D50) — read-only
   update_memory  rewrite one fact by id, e.g. after a correction
-  forget_memory  delete facts (or everything) — two steps: the first call only parks the request and
-                 tells the agent to ask; the delete happens when the owner's very next message is a
-                 clear yes (checked here, in code — `memory.is_clear_yes`), never on the model's say-so.
+  forget_memory  delete facts (or everything) — its manifest needs approval (#66, D51), so the graph
+                 pauses and the owner approves or denies on a card before this ever runs; never on
+                 the model's say-so.
 
 Saves, updates and deletions also send a `memory_event` through LangGraph's stream writer; api.py turns
 it into an SSE `memory` event so the reply can show "Remembered: … · Undo" (or "Forgot: …").
 """
 
 import time
-from typing import Annotated, Literal
+from typing import Literal
 
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool, tool
 from langgraph.config import get_stream_writer
-from langgraph.prebuilt import InjectedState
 
-from simba.common import emit_trace, neutralise_tag, text_of
-from simba.memory import MemoryFull, MemoryStore, is_clear_yes
+from simba.common import emit_trace, neutralise_tag
+from simba.memory import MemoryFull, MemoryStore
 from simba.tools.registry import ToolManifest, declare
 
-# #65: what the memory tools may do. Local only (no network hosts, no cost). The write tools change
-# memory but are guarded by code limits (harness/tool_hooks.py's memory_from_owner) and Undo, so they
-# need no approval card (D51, #66); forget_memory gets its card in #66.
+# #65: what the memory tools may do. Local only (no network hosts, no cost).
+# D51 (#66): remember and update_memory change memory but are guarded by code limits
+# (harness/tool_hooks.py's memory_from_owner) and can be undone, so they need no approval card.
+# forget_memory can't be undone, so every call waits for the owner's approve on the card.
 READ_MANIFEST = ToolManifest(access="read", enabled=True)
 WRITE_MANIFEST = ToolManifest(access="write", enabled=True)
+FORGET_MANIFEST = ToolManifest(access="write", needs_approval=True, enabled=True)
 
 # Trace details are shown in a narrow panel column (docs/contracts.md § 6): keep them short.
 MAX_TRACE_DETAIL_CHARS = 80
@@ -156,56 +157,30 @@ def make_memory_tools(store: MemoryStore) -> list[BaseTool]:
         return f"Updated #{fact_id}: {new['text']}"
 
     @tool("forget_memory")
-    async def forget_memory(
-        config: RunnableConfig,
-        state: Annotated[dict, InjectedState],
-        fact_ids: list[int] | None = None,
-        everything: bool = False,
-    ) -> str:
-        """Delete saved facts the user wants forgotten — only with their confirmation.
+    async def forget_memory(fact_ids: list[int] | None = None, everything: bool = False) -> str:
+        """Delete saved facts the user wants forgotten.
 
-        Call it once with the fact_ids (from list_memory), or everything=true for all of memory. The
-        first call deletes nothing: it tells you to ask the user "Forget …? (yes/no)". When they
-        answer, call it again with the same arguments; it deletes only if their answer is a clear yes.
+        Call it with the fact_ids (from list_memory), or everything=true for all of memory. The user
+        sees an approve / deny card before anything is deleted, so don't ask them to confirm in chat.
         """
         started = time.perf_counter()
-        chat_id = _chat_id(config) or ""
-        target: list[int] | str = "all" if everything else sorted(set(fact_ids or []))
-        if not target:
+        # By the time this runs, the owner has approved it on the card (FORGET_MANIFEST's
+        # needs_approval -> nodes/approval.py). The gate is the graph, not this function.
+        if everything:
+            gone = await store.list_facts()
+            await store.delete_all()
+        elif fact_ids:
+            gone = await store.delete_facts(sorted(set(fact_ids)))
+        else:
             return "Say which facts to forget (fact_ids from list_memory), or everything=true."
-
-        # 1. Which owner message are we on? The request may only be confirmed by the next one.
-        human_texts = [text_of(m) for m in state["messages"] if m.type == "human"]
-        human_turn = len(human_texts)
-        pending = await store.get_pending(chat_id)
-
-        # 2. Confirmed: this exact request was parked on the owner's previous message, and this
-        #    message is a clear yes. Only now is anything deleted.
-        if pending == (target, human_turn - 1) and is_clear_yes(human_texts[-1] if human_texts else ""):
-            await store.clear_pending(chat_id)
-            if target == "all":
-                gone = await store.list_facts()
-                await store.delete_all()
-            else:
-                gone = await store.delete_facts(target)
-            for fact in gone:
-                _send_memory_event("forgotten", fact)
-            emit_trace("forget_memory", "ok", f"forgot {len(gone)} fact(s)", started)
-            return f"Forgot {len(gone)} fact(s)."
-
-        # 3. Otherwise park the request and have the agent ask. Anything else the owner says next
-        #    (a "no", a new question) leaves memory untouched.
-        await store.set_pending(chat_id, target, human_turn)
-        facts = await store.list_facts() if target == "all" else [f for i in target if (f := await store.get_fact(i))]
-        emit_trace("forget_memory", "ok", f"waiting for yes · {len(facts)} fact(s)", started)
-        listed = "; ".join(f'"{f["text"]}"' for f in facts[:10]) + (" …" if len(facts) > 10 else "")
-        return (f"Nothing deleted yet. Ask the user to confirm: forget {len(facts)} fact(s): {listed}? "
-                "Only a clear yes in their next message lets you delete; then call forget_memory again "
-                "with the same arguments.")
+        for fact in gone:
+            _send_memory_event("forgotten", fact)
+        emit_trace("forget_memory", "ok", f"forgot {len(gone)} fact(s)", started)
+        return f"Forgot {len(gone)} fact(s)."
 
     return [
         declare(remember, WRITE_MANIFEST), declare(list_memory, READ_MANIFEST),
         declare(recall_memory, READ_MANIFEST), declare(update_memory, WRITE_MANIFEST),
-        declare(forget_memory, WRITE_MANIFEST),
+        declare(forget_memory, FORGET_MANIFEST),
     ]
 

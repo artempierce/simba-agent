@@ -7,7 +7,7 @@
 
 /** One line in the trace panel: what one graph node did (backend: common.emit_trace). */
 export type TraceLine = {
-  stage: string // before_model | agent | before_tool | web_search | after_tool | remember | after_model | refuse | budget (intent | reason | generate on older chats)
+  stage: string // before_model | agent | before_tool | approval | web_search | after_tool | remember | after_model | refuse | budget (intent | reason | generate on older chats)
   // (guard/output_guard on chats saved before #32; echo in step 1)
   status: 'ok' | 'blocked' | 'error' | 'flagged' // flagged (#8): passed, but the classifier raised a flag
   detail: string
@@ -51,7 +51,7 @@ export type Fact = {
 
 /** The SSE `memory` event (#81, #87): a memory tool saved, updated or forgot a fact while writing a reply. */
 export type MemoryEvent = {
-  action: 'added' | 'updated' | 'forgotten' // saved, rewritten (incl. near-duplicates), or deleted after your yes
+  action: 'added' | 'updated' | 'forgotten' // saved, rewritten (incl. near-duplicates), or deleted after you approved
   fact_id: number
   kind: FactKind
   text: string
@@ -70,6 +70,12 @@ export type ChatSummary = {
   turns: number // how many of your messages it covers
   updated_at: string
 }
+
+/** One tool call waiting for your approval (#66): which tool, with what arguments, and why it waits. */
+export type ApprovalCall = { id: string; tool: string; args: Record<string, unknown>; reason: string }
+
+/** The SSE `approval` event (#66), also GET /api/chats/{id}'s `approval`: the paused turn's calls. */
+export type ApprovalRequest = { calls: ApprovalCall[] }
 
 /** One chat in the sidebar (step 6). Times are ISO 8601 UTC strings. */
 export type Chat = { id: string; title: string; created_at: string; updated_at: string }
