@@ -3,6 +3,15 @@
 Why `backend/simba/prompts/system.md` changed, newest first. One entry per change: what, why, and how
 it was checked. (#10 asked for this before/after log.)
 
+## 2026-10-01 — forget waits for the approval card (#66b)
+
+- **Before:** forget_memory "deletes nothing until you have asked 'Forget …? (yes/no)' and they answer
+  yes in their next message; then call it again with the same arguments."
+- **After:** call forget_memory once; the user approves or denies it on a card, so don't ask in chat.
+- **Why:** D51 — the approval card replaced the next-message yes (D47); the old wording would make
+  Simba ask twice.
+- **Checked:** backend tests with the fake model; no paid runs (a wording fix to match the code).
+
 ## 2026-09-30 — recall past chats (#83)
 
 - **Added:** when the user refers to an earlier chat or something not in <memory>, use recall_memory — with

@@ -154,8 +154,18 @@ async def test_api_pauses_with_an_approval_event_then_resumes_on_approve(tmp_pat
         assert "".join(d["text"] for n, d in second if n == "token") == "Done."
         assert any(n == "trace" and d["stage"] == "approval" and d["detail"].startswith("approved") for n, d in second)
 
-        runs = (await client.get(f"/api/chats/{chat_id}")).json()["runs"]
-        assert len(runs) == 1 and [line["stage"] for line in runs[0]["lines"]].count("approval") == 2
+        detail = (await client.get(f"/api/chats/{chat_id}")).json()
+        assert len(detail["runs"]) == 1 and [line["stage"] for line in detail["runs"][0]["lines"]].count("approval") == 2
+        assert detail["approval"] is None  # answered: no card left
+
+
+async def test_a_reopened_paused_chat_still_has_its_card(tmp_path):
+    """#66b: GET /api/chats/{id} returns the waiting calls, so a reload doesn't lose the card (and the
+    owner isn't stuck: a new message would get 409 until the card is answered)."""
+    async with app_with_send_tool(tmp_path, []) as (_app, client):
+        first = parse_sse((await client.post("/api/chat", json={"message": "send a note"})).text)
+        detail = (await client.get(f"/api/chats/{first[0][1]['chat_id']}")).json()
+    assert detail["approval"]["calls"][0]["tool"] == "send_note"
 
 
 async def test_api_deny_never_runs_and_a_second_answer_or_new_message_is_refused(tmp_path):

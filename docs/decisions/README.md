@@ -55,10 +55,11 @@ and are recorded here first; the design book catches up at its next sync.
 | D44 | Memory is managed in a Memory tab in the sidebar: view, add, edit, delete, delete all | accepted | Sol, 30 Sep, #79 Q5 |
 | D45 | Memory text (facts, summaries, recall results) is data inside a fenced block, never instructions | accepted | Sol, 30 Sep, #79 |
 | D46 | Memory changes only by talking to Simba (like Claude Code's own memory): tools `remember`, `list_memory`, `update_memory`, `forget_memory`; no add/edit/delete buttons (Undo under a reply stays) | accepted | Sol, 30 Sep, #87 |
-| D47 | Forgetting is two-step: Simba asks, and only the owner's clear yes in the very next message deletes; checked in code | accepted | Sol, 30 Sep, #87 |
+| D47 | Forgetting is two-step: Simba asks, and only the owner's clear yes in the very next message deletes; checked in code | replaced by D51 | Sol, 30 Sep, #87 |
 | D48 | Learned procedural memory: up to 15 `feedback` facts are always in the prompt, next to the `user` profile | accepted | Sol, 30 Sep, #87 |
 | D49 | A read-only Memory page behind header tabs Chat \| Memory replaces the sidebar Memory tab | accepted | Sol, 30 Sep, #87 |
 | D50 | Recall without an embedding model, like Claude Code's memory: an index of recent chats (with short ids) always in the prompt, `recall_memory(query)` keyword search (SQLite FTS5, BM25) over facts and summaries, `recall_memory(chat=id)` opens one chat's full summary; Claude matches meaning when it reads the index (replaces D42) | accepted | Sol, 30 Sep, #83 |
+| D51 | Which writes get an approval card (refines D35): a write that can be undone and has code limits (`remember`, `update_memory`) runs without one; `forget_memory` can't be undone, so it always waits for the owner's approve on the card (replaces D47's next-message yes). After web results every write still waits, and memory writes stay blocked | accepted | Sol, 30 Sep, #66 Q1 |
 
 ## Template for a decision file
 

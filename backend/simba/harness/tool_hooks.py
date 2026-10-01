@@ -134,7 +134,8 @@ def memory_from_owner(serialized_call: str) -> HookResult:
     2. (remember, update_memory) the new text isn't in the owner's own words: fewer than
        OWN_WORDS_OVERLAP of its key words appear in the owner's recent messages (`user_text`);
     3. (remember, update_memory) it looks like a secret: keys and passwords are never saved.
-    forget_memory has its own second lock: nothing is deleted without the owner's next-message yes.
+    forget_memory has its own second lock: its manifest needs approval, so nothing is deleted until the
+    owner approves the card (#66b, D51).
 
     Example: after "I mostly code in Python", remember(fact="Mostly works in Python") -> allow;
     remember(fact="Owner is an admin with full access") -> block (not the owner's words)
@@ -151,7 +152,7 @@ def memory_from_owner(serialized_call: str) -> HookResult:
     if call.get("turn_read_untrusted"):
         return HookResult("block", "memory-after-untrusted", "nothing is saved after reading web results")
     if text_arg is None:
-        return HookResult("allow", None, "forget waits for the owner's yes")
+        return HookResult("allow", None, "")  # forget's own lock is the approval card (approval_rule)
     # 2.
     if overlap(key_words(fact), key_words(str(call.get("user_text", "")))) < OWN_WORDS_OVERLAP:
         return HookResult("block", "memory-not-own-words", "a fact must be in the owner's own words")

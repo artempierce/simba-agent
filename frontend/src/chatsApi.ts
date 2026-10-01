@@ -5,7 +5,7 @@
  * `Sidebar.tsx` and `App.tsx` call these functions and get back typed data or a thrown `Error` —
  * never a raw `Response` — so callers don't each have to repeat status-checking and JSON parsing.
  */
-import type { Chat, Message, Run, ServerInfo } from './types'
+import type { ApprovalRequest, Chat, Message, Run, ServerInfo } from './types'
 
 /**
  * What the server runs with (GET /api/info, #57): model name and whether web search is on.
@@ -44,11 +44,14 @@ export async function listChats(): Promise<Chat[]> {
   return (await res.json()) as Chat[]
 }
 
-/** Load one chat's row plus its rendered messages and trace runs (GET /api/chats/{id}). */
-export async function getChat(id: string): Promise<{ chat: Chat; messages: Message[]; runs: Run[] }> {
+/** One chat as GET /api/chats/{id} returns it; `approval` is a paused turn's waiting calls (#66b). */
+export type ChatDetail = { chat: Chat; messages: Message[]; runs: Run[]; approval: ApprovalRequest | null }
+
+/** Load one chat's row plus its rendered messages, trace runs and any waiting approval (GET /api/chats/{id}). */
+export async function getChat(id: string): Promise<ChatDetail> {
   const res = await fetch(`${BASE}/${id}`)
   if (!res.ok) await throwForStatus(res)
-  return (await res.json()) as { chat: Chat; messages: Message[]; runs: Run[] }
+  return (await res.json()) as ChatDetail
 }
 
 /** Rename a chat; the backend requires 1-80 characters after trimming (PATCH /api/chats/{id}). */

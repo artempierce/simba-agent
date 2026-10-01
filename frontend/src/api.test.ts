@@ -11,7 +11,7 @@
  * @vitest-environment node
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { streamChat, type ChatHandlers } from './api'
+import { streamChat, streamResume, type ChatHandlers } from './api'
 
 /**
  * Make `fetch` answer with a 200 response whose body arrives as exactly these text chunks, one per
@@ -40,6 +40,7 @@ function recordingHandlers() {
     onToken: record('token'),
     onReplace: record('replace'),
     onMemory: record('memory'),
+    onApproval: record('approval'),
     onError: record('error'),
     onDone: record('done'),
   }
@@ -50,6 +51,28 @@ function recordingHandlers() {
 const sse = (name: string, data: unknown) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`
 
 afterEach(() => vi.unstubAllGlobals())
+
+describe('approval (#66)', () => {
+  /** A paused turn: the `approval` event reaches onApproval, and the `done` after it ends the run. */
+  it('dispatches the approval event', async () => {
+    const request = { calls: [{ id: 'c1', tool: 'forget_memory', args: { fact_ids: [3] }, reason: 'waits for approval' }] }
+    fakeStream([sse('approval', request) + sse('done', {})])
+    const { calls, handlers } = recordingHandlers()
+    await streamChat('forget it', 'chat1', handlers)
+    expect(calls).toEqual([['approval', request], ['done', {}]])
+  })
+
+  /** Approve / Deny posts {approve} to the chat's resume URL, and the reply streams like a turn. */
+  it('streamResume posts the answer to the resume endpoint', async () => {
+    fakeStream([sse('token', { text: 'Done.' }) + sse('done', {})])
+    const { calls, handlers } = recordingHandlers()
+    await streamResume('chat1', false, handlers)
+    const [url, init] = vi.mocked(fetch).mock.calls[0]
+    expect(url).toBe('/api/chat/chat1/resume')
+    expect(JSON.parse(String(init?.body))).toEqual({ approve: false })
+    expect(calls).toEqual([['token', 'Done.'], ['done', {}]])
+  })
+})
 
 describe('streamChat', () => {
   /** The happy path: every event reaches its handler in order, and a `done` ends without an error. */

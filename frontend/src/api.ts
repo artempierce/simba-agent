@@ -10,7 +10,7 @@
  * (it sends a message body). So instead we read the response body as a stream and split
  * Server-Sent Events (SSE) out of it ourselves.
  */
-import type { MemoryEvent, RunSummary, TraceLine } from './types'
+import type { ApprovalRequest, MemoryEvent, RunSummary, TraceLine } from './types'
 
 /** Callbacks streamChat calls as the backend's SSE events arrive (docs/contracts.md § 9). */
 export type ChatHandlers = {
@@ -21,6 +21,8 @@ export type ChatHandlers = {
   onReplace: (text: string) => void
   // #81: the remember tool saved a fact; the reply shows it with an Undo.
   onMemory: (event: MemoryEvent) => void
+  // #66: the turn paused; these calls wait for the owner's approve / deny (then `done` ends the stream).
+  onApproval: (request: ApprovalRequest) => void
   onError: (message: string) => void
   onDone: (summary: RunSummary) => void
 }
@@ -50,6 +52,7 @@ function dispatchEvent(block: string, handlers: ChatHandlers): boolean {
   else if (name === 'token') handlers.onToken(payload.text)
   else if (name === 'replace') handlers.onReplace(payload.text)
   else if (name === 'memory') handlers.onMemory(payload)
+  else if (name === 'approval') handlers.onApproval(payload)
   else if (name === 'error') {
     handlers.onError(payload.message)
     return true
@@ -81,13 +84,26 @@ function dispatchEvent(block: string, handlers: ChatHandlers): boolean {
  *    nothing dispatched a `done` or `error` — report that the stream ended unexpectedly.
  */
 export async function streamChat(message: string, chatId: string | null, handlers: ChatHandlers): Promise<void> {
+  return streamPost('/api/chat', { message, chat_id: chatId }, handlers)
+}
+
+/**
+ * Answer an approval card (#66): POST /api/chat/{chatId}/resume and stream the rest of the paused
+ * turn through the same handlers (the same events as a normal turn). Only `approve: true` approves.
+ */
+export async function streamResume(chatId: string, approve: boolean, handlers: ChatHandlers): Promise<void> {
+  return streamPost(`/api/chat/${encodeURIComponent(chatId)}/resume`, { approve }, handlers)
+}
+
+/** POST `body` to `url` and dispatch the SSE reply to `handlers` — steps 1–4 above. */
+async function streamPost(url: string, body: unknown, handlers: ChatHandlers): Promise<void> {
   // 1.
   let res: Response
   try {
-    res = await fetch('/api/chat', {
+    res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, chat_id: chatId }),
+      body: JSON.stringify(body),
     })
   } catch {
     handlers.onError("Can't reach the backend.")

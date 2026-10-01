@@ -324,11 +324,15 @@
       },
       "ChatDetail": {
         "type": "object",
-        "required": ["chat", "messages", "runs"],
+        "required": ["chat", "messages", "runs", "approval"],
         "properties": {
           "chat": { "$ref": "#/components/schemas/Chat" },
           "messages": { "type": "array", "items": { "$ref": "#/components/schemas/Message" } },
-          "runs": { "type": "array", "items": { "$ref": "#/components/schemas/Run" } }
+          "runs": { "type": "array", "items": { "$ref": "#/components/schemas/Run" } },
+          "approval": {
+            "description": "#66b: what a paused turn is waiting on (same shape as the `approval` event's data), or null — so a reopened chat shows its card again.",
+            "anyOf": [ { "$ref": "#/components/schemas/ApprovalEvent/properties/data" }, { "type": "null" } ]
+          }
         }
       },
       "Run": {

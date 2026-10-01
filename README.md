@@ -38,7 +38,8 @@ never blocks on its own: it tells the agent to look carefully, and the LLM makes
 | 6 | Chats sidebar: new, open, rename, delete | done |
 | M1 | Memory: saved facts, Memory tab in the sidebar, your profile in every prompt (#80) | done |
 | M2 | Memory: Simba remembers by itself (`remember` tool, code limits), "Remembered · Undo" (#81) | done |
-| M2b | Memory by talking: "what do you remember?", corrections, forget with a yes; learned rules always loaded; Memory page (#87) | done |
+| M2b | Memory by talking: "what do you remember?", corrections, forget (now on an approve / deny card, #66b); learned rules always loaded; Memory page (#87) | done |
+| 0.4 | Tool manifests (#65); approval pause + untrusted-content rule; approve / deny card (#66, D51) | done |
 | M3 | Episodic memory: a rolling summary per chat every 6 messages; recent chats in the prompt; Past chats on the Memory page (#82) | done |
 | M4 | Recall like Claude Code: open a past chat by id, keyword search over memory; no embedding model (#83, D50) | done |
 | — | Harness redesign: guard/output_guard become before_model/after_model hooks (#32) | done |
@@ -168,9 +169,10 @@ simba-agent/
 │   └── prompts/              Simba's procedural memory: system.md (the only prompt)
 └── frontend/src/
     ├── App.tsx               the page and all its state
-    ├── api.ts                streamChat: POST + a small SSE parser
+    ├── api.ts                streamChat / streamResume (#66): POST + a small SSE parser
     ├── chatsApi.ts           the chat list's REST calls
+    ├── approval.ts           a waiting tool call in plain words, for the approval card (#66b)
     ├── types.ts              shapes shared with the backend
     └── components/           Sidebar (chat list), MobileDrawer, ChatView (messages + input),
-                              TracePanel (the dark right pane)
+                              ApprovalCard (approve / deny, #66b), TracePanel (the dark right pane)
 ```

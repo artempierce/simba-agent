@@ -11,11 +11,17 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
-import { streamChat } from './api'
+import { streamChat, streamResume } from './api'
 import { getChat, getInfo, listChats } from './chatsApi'
-import type { Chat, Message, Run } from './types'
+import type { ApprovalRequest, Chat, Message, Run } from './types'
 
-vi.mock('./api', () => ({ streamChat: vi.fn() }))
+vi.mock('./api', () => ({ streamChat: vi.fn(), streamResume: vi.fn() }))
+vi.mock('./memoryApi', () => ({
+  listFacts: vi.fn(async () => []),
+  listSummaries: vi.fn(async () => []),
+  deleteFact: vi.fn(),
+  updateFact: vi.fn(),
+}))
 vi.mock('./chatsApi', () => ({
   listChats: vi.fn(),
   getChat: vi.fn(),
@@ -42,6 +48,7 @@ const loaded = (id: string, text: string) => ({
   chat: chat(id, id),
   messages: [{ role: 'user', content: text }] as Message[],
   runs: [] as Run[],
+  approval: null as ApprovalRequest | null,
 })
 
 /** Resolve a deferred inside act(), so React applies the state it causes before we assert. */
@@ -130,5 +137,26 @@ describe('App stale-response guards', () => {
 
     expect(screen.getByRole('button', { name: 'Fresh chat' })).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Stale chat' })).toBeNull()
+  })
+})
+
+describe('approval card (#66b)', () => {
+  /**
+   * Reopening a chat whose turn is paused shows its card and locks the message box (the backend
+   * would refuse a new message with 409). Approve resumes that chat with `true` and the card goes.
+   */
+  it('shows a paused chat card, locks sending, and resumes on Approve', async () => {
+    const request = { calls: [{ id: 'c1', tool: 'forget_memory', args: { fact_ids: [3] }, reason: 'waits for approval' }] }
+    vi.mocked(getChat).mockResolvedValue({ ...loaded('a', 'forget that'), approval: request })
+    vi.mocked(streamResume).mockResolvedValue(undefined)
+    render(<App />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Chat A' }))
+    expect(await screen.findByRole('region', { name: 'Approval needed' })).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true)
+
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Approve' })))
+    expect(streamResume).toHaveBeenCalledWith('a', true, expect.any(Object))
+    expect(screen.queryByRole('region', { name: 'Approval needed' })).toBeNull()
   })
 })

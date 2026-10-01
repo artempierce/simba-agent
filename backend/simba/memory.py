@@ -17,16 +17,14 @@ Key ideas:
 - Episodic memory (#82, D41): each chat keeps one rolling summary (`chat_summaries`), rewritten every
   SUMMARY_EVERY owner turns by the summarize node. The prompt gets a one-line index of the most
   recent ones (RECENT_CHATS_IN_PROMPT); the full text is read on demand (M4's recall).
-- Memory changes only by talking to Simba (#87, D46): its tools call this store. Forgetting is
-  two-step (D47): a request is parked as "pending" for the chat, and only the owner's clear "yes" in
-  the very next message lets it through (`is_clear_yes`, the forget tool).
+- Memory changes only by talking to Simba (#87, D46): its tools call this store. Forgetting
+  waits for the owner's approve on an approval card (#66, D51; replaced D47's next-message yes).
 - Everything is plain SQL on one table. Size limits are enforced here, in code, so no caller can
   store a fact longer than MAX_FACT_CHARS or more than MAX_FACTS facts (D40's code limits).
 """
 
 from __future__ import annotations
 
-import json
 import re
 from datetime import datetime, timezone
 
@@ -68,12 +66,6 @@ SUMMARY_EVERY = 6
 
 # The kinds that are always in the prompt, in the order the prompt shows them.
 ALWAYS_LOADED = ("user", "feedback")
-
-# A reply counts as "yes" for a pending forget only if it starts with one of these, and contains
-# none of NEGATIONS. Deliberately strict: when in doubt, nothing is deleted and Simba asks again.
-YES_WORDS = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "confirm", "confirmed", "go ahead",
-             "do it", "please do", "delete it", "forget it", "да")
-NEGATIONS = ("no", "not", "don't", "dont", "wait", "cancel", "stop", "keep", "нет")
 
 _COLUMNS = ("id", "kind", "text", "why", "source_chat_id", "created_at", "updated_at")
 
@@ -167,13 +159,8 @@ class MemoryStore:
             "SELECT 'fact', id, kind || ': ' || text || ' ' || coalesce(why, '') FROM memory_facts"
         )
         await db.execute("INSERT INTO memory_search (source, ref, text) SELECT 'chat', chat_id, summary FROM chat_summaries")
-        # #87: at most one forget request waiting for a "yes", per chat. `target` is a JSON list of
-        # fact ids, or "all"; `human_turn` is how many owner messages the chat had when it was asked.
-        await db.execute(
-            """CREATE TABLE IF NOT EXISTS memory_pending (
-                chat_id TEXT PRIMARY KEY, target TEXT NOT NULL, human_turn INTEGER NOT NULL
-            )"""
-        )
+        # #66b: the old next-message-yes table for forget (#87) is gone; the approval card replaced it.
+        await db.execute("DROP TABLE IF EXISTS memory_pending")
         await db.commit()
         return cls(db)
 
@@ -374,25 +361,6 @@ class MemoryStore:
         await self._db.commit()
         return gone
 
-    async def set_pending(self, chat_id: str, target: list[int] | str, human_turn: int) -> None:
-        """Park a forget request for this chat until the owner answers (replaces any earlier one)."""
-        await self._db.execute(
-            "INSERT OR REPLACE INTO memory_pending (chat_id, target, human_turn) VALUES (?, ?, ?)",
-            (chat_id, json.dumps(target), human_turn),
-        )
-        await self._db.commit()
-
-    async def get_pending(self, chat_id: str) -> tuple[list[int] | str, int] | None:
-        """The parked forget request for this chat as (target, human_turn), or None."""
-        cursor = await self._db.execute("SELECT target, human_turn FROM memory_pending WHERE chat_id = ?", (chat_id,))
-        row = await cursor.fetchone()
-        return (json.loads(row[0]), row[1]) if row else None
-
-    async def clear_pending(self, chat_id: str) -> None:
-        """Drop this chat's parked forget request."""
-        await self._db.execute("DELETE FROM memory_pending WHERE chat_id = ?", (chat_id,))
-        await self._db.commit()
-
     async def close(self) -> None:
         """Close the database connection (api.py's lifespan calls this on shutdown)."""
         await self._db.close()
@@ -427,19 +395,6 @@ def _day(iso: str) -> str:
     except ValueError:
         return iso[:10]
     return f"{d.day} {d:%b}"  # not strftime("%-d"): that doesn't exist on Windows
-
-
-def is_clear_yes(text: str) -> bool:
-    """Whether the owner's message is a plain yes (D47): it starts with a YES_WORDS entry and contains
-    no NEGATIONS word. Strict on purpose — a doubtful answer deletes nothing.
-
-    Examples: "Yes, forget it" -> True; "ok" -> True; "yes but not the Python one" -> False;
-    "no" -> False; "tell me more" -> False
-    """
-    words = re.findall(r"[\w']+", text.lower())
-    joined = " ".join(words)
-    starts_yes = any(joined == w or joined.startswith(w + " ") for w in YES_WORDS)
-    return starts_yes and not any(neg in words for neg in NEGATIONS)
 
 
 def _checked_text(text: str) -> str:
