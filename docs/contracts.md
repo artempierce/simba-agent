@@ -22,6 +22,8 @@ them in the same change.
 | `backend/simba/harness/tool_hooks.py` | search-call validation and untrusted-result scan (#17) | § 7.8 |
 | `backend/simba/nodes/hook_points.py` | `before_model` / `after_model` nodes (#32) | § 7.2, § 7.7 |
 | `backend/simba/tools/web_search.py` | optional Tavily search tool and result boundary (#17) | § 7.8 |
+| `backend/simba/skills/` | skill files (`<name>.md`) + loader `list_skills` / `read_skill` (#95) | § 7.5c |
+| `backend/simba/tools/skill_tools.py` | the `load_skill` tool (#95) | § 7.5c |
 | `backend/simba/nodes/refuse.py` | refuse node | § 7.3 |
 | `backend/simba/nodes/agent.py` | agent node (#33, was `intent.py`/`reason.py`/`generate.py`) | § 7.4 |
 | `backend/simba/graph.py` | graph wiring | § 8 |
@@ -256,6 +258,23 @@ enabled tools; `before_tool` puts the manifest (or `null`) in each call's hook p
 `allowlisted_tool_call` blocks a call with no manifest or a disabled one (`tool-not-allowed`). Its
 allow reason is the trace line `{name} · {access} · {no approval|needs approval}`.
 
+### § 7.5c Skills (`simba/skills/`, `simba/tools/skill_tools.py`, #95, D53)
+
+- A skill is `simba/skills/<name>.md`: YAML front matter `name` (matches the file name, `[a-z0-9]+(-[a-z0-9]+)*`)
+  and `description` (one line, ≤ `MAX_DESCRIPTION_CHARS` 200), then a non-empty markdown body.
+  `parse_skill(path) -> Skill(name, description, body)` raises `SkillError` naming the file;
+  `list_skills()` reads every file fresh on each call (sorted by name); `read_skill(name) -> Skill | None`
+  checks the name's shape before reading anything.
+- The agent node appends `skills_block(list_skills())` to the system prompt when `load_skill` is among
+  its tools: `"\n\nSkills (load one with load_skill when a task matches it, then follow it):\n- {name}: {description}"`
+  per skill; `""` when there are none. Bodies never go in the prompt.
+- `load_skill(name: str) -> str` (manifest: read, no approval, enabled, no per-turn limit) returns
+  `<skill name="{name}">\n{body escaped with neutralise_tag(…, "skill")}\n</skill>`, trace `load_skill`, `ok`,
+  `skill · {name}`; an unknown name returns `No skill called '{name}'. Available: {names}.` with trace
+  status `error`. A skill result doesn't set `turn_read_untrusted` (only web_search results do).
+- The input guard's `fake-tags` rule blocks a typed `<skill>` tag. A skill can't grant tools or permissions.
+- `build_graph(..., skill_tools=[...])` and api.py's registry include it.
+
 ### § 7.9 Approval pause (`simba/nodes/approval.py`, #66, D35)
 
 - `approval_rule` (last `before_tool` hook) flags a valid call with rule `needs-approval` when its
@@ -312,7 +331,7 @@ classifier as above, and stores `app.state.graph`, `app.state.checkpointer` (and
 `app.state.chats`).
 
 - `GET /api/health` → `{"ok": true}`.
-- `GET /api/info` → `{"model": str, "web_search": bool, "chat_budget_usd": float, "tools": [Manifest]}` (#57, #65):
+- `GET /api/info` → `{"model": str, "web_search": bool, "chat_budget_usd": float, "tools": [Manifest], "skills": [{"name": str, "description": str}]}` (#57, #65, #95):
   `model_name(chat_model)` (`"fake"` for the fake model), whether a search tool was built,
   `CHAT_BUDGET_USD`, and every tool's permission manifest (§ 7.5b), each
   `{"name", "access": "read"|"write", "hosts": [str], "cost_per_call": str, "max_calls_per_turn": int|null,

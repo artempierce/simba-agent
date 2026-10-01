@@ -259,12 +259,21 @@
       },
       "Info": {
         "type": "object",
-        "required": ["model", "web_search", "chat_budget_usd", "tools"],
+        "required": ["model", "web_search", "chat_budget_usd", "tools", "skills"],
         "properties": {
           "model": { "type": "string", "examples": ["claude-haiku-4-5", "fake"] },
           "web_search": { "type": "boolean", "description": "True when TAVILY_API_KEY was set at start-up." },
           "chat_budget_usd": { "type": "number", "examples": [0.5] },
-          "tools": { "type": "array", "description": "Every tool's permission manifest (#65, D34).", "items": { "$ref": "#/components/schemas/ToolManifest" } }
+          "tools": { "type": "array", "description": "Every tool's permission manifest (#65, D34).", "items": { "$ref": "#/components/schemas/ToolManifest" } },
+          "skills": { "type": "array", "description": "The skills Simba can load with load_skill (#95, D53).", "items": { "$ref": "#/components/schemas/SkillInfo" } }
+        }
+      },
+      "SkillInfo": {
+        "type": "object",
+        "required": ["name", "description"],
+        "properties": {
+          "name": { "type": "string", "examples": ["explain-concept"] },
+          "description": { "type": "string", "description": "One line, at most 200 characters; it goes into every prompt." }
         }
       },
       "ToolManifest": {

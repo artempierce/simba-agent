@@ -40,6 +40,7 @@ never blocks on its own: it tells the agent to look carefully, and the LLM makes
 | M2 | Memory: Simba remembers by itself (`remember` tool, code limits), "Remembered · Undo" (#81) | done |
 | M2b | Memory by talking: "what do you remember?", corrections, forget (now on an approve / deny card, #66b); learned rules always loaded; Memory page (#87) | done |
 | 0.4 | Tool manifests (#65); approval pause + untrusted-content rule; approve / deny card (#66, D51) | done |
+| 0.4 | Skills: markdown procedures in `simba/skills/`, an index in the prompt, `load_skill` reads one (#95, D53) | done |
 | M3 | Episodic memory: a rolling summary per chat every 6 messages; recent chats in the prompt; Past chats on the Memory page (#82) | done |
 | M4 | Recall like Claude Code: open a past chat by id, keyword search over memory; no embedding model (#83, D50) | done |
 | — | Harness redesign: guard/output_guard become before_model/after_model hooks (#32) | done |
@@ -162,6 +163,8 @@ simba-agent/
 │   ├── nodes/                one file per graph node: hook_points (before_model/after_model), agent, approval (#66 pause), refuse
 │   ├── tools/registry.py     ToolManifest (what a tool may do) and ToolRegistry (#65)
 │   ├── tools/web_search.py   optional Tavily client, capped/untrusted results
+│   ├── tools/skill_tools.py  load_skill: reads one skill's body (#95)
+│   ├── skills/               skill files (<name>.md: name, description, procedure) + their loader (#95)
 │   ├── model.py              real Claude or the free fake model; cost per call
 │   ├── state.py              the graph's state
 │   ├── schemas.py            structured-output shape (ReportUnsafe)

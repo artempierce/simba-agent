@@ -56,6 +56,11 @@ Each line should map to at least one test.
   **then** it's refused with a clear message and a `budget` trace line, and no model call is made.
 - **Given** a new chat, **then** its title is the first message cut to 40 characters, and it can be
   renamed and deleted.
+- **Given** a skill file in `simba/skills/` and a request that matches its description, **when** the
+  model calls `load_skill`, **then** the skill's body reaches the model and the trace shows
+  `skill · <name>` (#95).
+- **Given** a skill file with a missing name, a name that doesn't match the file, a description over
+  200 characters or an empty body, **then** the tests fail with the file's name (#95).
 
 ## Constraints
 - Stack: FastAPI + LangGraph backend, Vite + React + TypeScript + Tailwind frontend.
