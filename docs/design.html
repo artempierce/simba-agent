@@ -128,6 +128,7 @@
       <li><a href="#loop">How my loop works</a></li>
       <li><a href="#guardrails">My guardrails</a></li>
       <li><a href="#memory-types">My memory, three types</a></li>
+      <li><a href="#cc-vs-simba">Me vs Simba: instructions vs code</a></li>
       <li class="part">Part B · Simba</li>
       <li><a href="#scope">Goal and scope</a></li>
       <li><a href="#layers">Harness, graph, agent</a></li>
@@ -265,6 +266,55 @@ flowchart TD
         </tbody>
       </table></div>
       <p>Two patterns worth copying: the <strong>index</strong> (a short list is always loaded, full entries only when relevant) and <strong>typed entries</strong> (each fact says what kind it is).</p>
+    </section>
+
+    <section id="cc-vs-simba">
+      <h2>Me vs Simba: instructions vs code</h2>
+      <p>Simba copies my loop and my memory design. The difference is who enforces the limits. Most of mine are <strong>instructions</strong>: text I read and follow, so they hold only as well as I follow them. Simba's hard limits are <strong>code</strong>: a check that runs whatever the model thinks (D20).</p>
+      <h3>Memory</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Rule</th><th>Me (Claude Code)</th><th>Simba</th></tr></thead>
+        <tbody>
+          <tr><td>Kinds of fact</td><td class="wrap">user · feedback · project · reference</td><td class="wrap">the same four</td></tr>
+          <tr><td>Where saved</td><td class="wrap">one markdown file per fact + <code>MEMORY.md</code> index, saved with my normal file tool</td><td class="wrap">SQLite, through the <code>remember</code> tool</td></tr>
+          <tr><td>Always loaded</td><td class="wrap"><code>MEMORY.md</code> index + <code>CLAUDE.md</code></td><td class="wrap">profile (≤ 15 facts), feedback rules, recent-chats index</td></tr>
+          <tr><td>Only your own words</td><td class="wrap">instruction</td><td class="wrap"><strong>code</strong>: key-word overlap check</td></tr>
+          <tr><td>No secrets</td><td class="wrap">instruction</td><td class="wrap"><strong>code</strong>: <code>no_secrets</code></td></tr>
+          <tr><td>After reading a web page</td><td class="wrap">instruction: treat it as data</td><td class="wrap"><strong>code</strong>: a save waits for your card, forgetting is blocked (D52)</td></tr>
+          <tr><td>Past conversations</td><td class="wrap">summarized only inside one session, when the context fills up</td><td class="wrap">rolling summary every 6 turns, kept across chats</td></tr>
+          <tr><td>Seeing and undoing</td><td class="wrap">the file-tool call in the terminal; edit or delete the file</td><td class="wrap">trace line, "Remembered: … · Undo"</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Answering a question</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Step</th><th>Me</th><th>Simba</th></tr></thead>
+        <tbody>
+          <tr><td>Before the model</td><td class="wrap">harness hooks, if any are set</td><td class="wrap"><code>before_model</code>: size, injection rules, classifier</td></tr>
+          <tr><td>The thinking</td><td class="wrap">one call: understand, plan, act</td><td class="wrap">one <code>agent</code> call (D21)</td></tr>
+          <tr><td>Before a tool</td><td class="wrap">permission mode, allow / deny rules, sandbox and worktree checks</td><td class="wrap"><code>before_tool</code>: manifest, budget, own-words, approval rule</td></tr>
+          <tr><td>Pause for you</td><td class="wrap">permission prompt, or I ask a question</td><td class="wrap">approve / deny card (<code>interrupt()</code>)</td></tr>
+          <tr><td>Tool results</td><td class="wrap">treated as data</td><td class="wrap">fenced in <code>&lt;untrusted_tool_result&gt;</code> and scanned</td></tr>
+          <tr><td>After the answer</td><td class="wrap">no check I can see</td><td class="wrap"><code>after_model</code>: secrets, tags, prompt leak</td></tr>
+          <tr><td>Procedures</td><td class="wrap">skills, loaded when a task needs one</td><td class="wrap">skills, loaded when a task needs one (#95)</td></tr>
+        </tbody>
+      </table></div>
+      <h3>The layers I run on</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Layer</th><th>What it is</th><th>Kind</th></tr></thead>
+        <tbody>
+          <tr><td>Training</td><td class="wrap">values and judgement learned before any session: honesty, refusing real harm, reading pages as data</td><td class="wrap">model</td></tr>
+          <tr><td>System prompt</td><td class="wrap">Claude Code's own rules: how to use tools, confirm risky actions, use git, save memory, write replies</td><td class="wrap">instruction</td></tr>
+          <tr><td>Tool descriptions</td><td class="wrap">what each tool does and its own rules (e.g. read a page fully before republishing it)</td><td class="wrap">instruction</td></tr>
+          <tr><td><code>CLAUDE.md</code> files</td><td class="wrap">yours: global, then project, then folder; a closer file wins</td><td class="wrap">instruction</td></tr>
+          <tr><td>Memory index</td><td class="wrap"><code>MEMORY.md</code>: facts about you and how you like to work</td><td class="wrap">information</td></tr>
+          <tr><td>Skills</td><td class="wrap">a procedure loaded when a task needs it</td><td class="wrap">instruction</td></tr>
+          <tr><td>Reminders</td><td class="wrap">harness notes during a session: a file changed, the date changed, time to give a status update</td><td class="wrap">instruction</td></tr>
+          <tr><td>Permissions and sandbox</td><td class="wrap">permission mode, allow / deny rules, worktree isolation, gates such as "read the page before republishing"</td><td class="wrap"><strong>code</strong></td></tr>
+          <tr><td>Hooks</td><td class="wrap">your scripts at fixed points; their output reaches me as your feedback</td><td class="wrap"><strong>code</strong></td></tr>
+        </tbody>
+      </table></div>
+      <p>An example from 1 Oct: I tried <code>git -C /Users/sol/simba-agent pull</code> from a worktree session, and the harness refused it in code before it ran. That is the same pattern as Simba's <code>before_tool</code>: a fixed check that the model can't argue past, whose reason goes back to the model.</p>
+      <p class="note">The lesson Simba takes from this: an instruction is fine for judgement calls (what to say, which tool fits), but anything that must never happen gets a check in code as well. Hard limits that rest only on instructions hold only as well as the model follows them.</p>
     </section>
 
     <!-- ============================== PART B ============================== -->
